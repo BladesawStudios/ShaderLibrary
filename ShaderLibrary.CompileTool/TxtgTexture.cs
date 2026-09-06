@@ -76,9 +76,11 @@ namespace ShaderLibrary.CompileTool
             { 0x602, TxtgFormat.BC4_UNORM },
             { 0x606, TxtgFormat.BC4_UNORM },
             { 0x607, TxtgFormat.BC4_UNORM },
+            { 0x609, TxtgFormat.BC4_UNORM },
             { 0x702, TxtgFormat.BC5_UNORM },
             { 0x703, TxtgFormat.BC5_UNORM },
             { 0x707, TxtgFormat.BC5_UNORM },
+            { 0x709, TxtgFormat.BC5_UNORM },
             { 0x901, TxtgFormat.BC7_UNORM },
         };
 

@@ -87,6 +87,15 @@ namespace ShaderLibrary.CompilerTool
                 return;
             }
 
+            if (args.Contains("--test-txtg"))
+            {
+                string[] names = positional.Length > 1
+                    ? positional[1..]
+                    : new[] { "Npc_Ganondorf_Miasma_Noise_Gn5", "LeafGray_01_Fca", "Npc_Ganondorf_Miasma_Body_Gn5" };
+                TestTxtg.RunDemo(romfsRoot, names);
+                return;
+            }
+
             if (args.Contains("--dump-bntx"))
             {
                 string bntxPath = positional.Length > 0 && File.Exists(positional[0]) ? positional[0] : (positional.Length > 1 ? positional[1] : "temp_icon.bntx");

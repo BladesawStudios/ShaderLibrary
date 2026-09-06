@@ -30,6 +30,26 @@ namespace ShaderLibrary.CompilerTool
             ExternalBinaryStringTable.RomfsRoot = romfsRoot;
             BfresLibraryPatches.EnsureApplied();
 
+            // "--reexport-geometry <ActorOrModelName> [outDir]" re-runs ONLY step 1 of the prepare
+            // pipeline (geometry + textures + skeleton + anims) over an already-prepared model,
+            // straight into Marrow's own cache. Steps 2 and 3 (material UBOs, manifest + shader
+            // decompile) depend on the material archive, not on the skeleton, so re-running them
+            // after a skeleton/anim export fix is pure wasted minutes.
+            if (args.Contains("--reexport-geometry"))
+            {
+                string actorOrModel = positional.Length > 1 ? positional[1] : "Animal_Bass";
+                var actor = ActorInfo.Resolve(romfsRoot, actorOrModel);
+                string resolved = actor?.ModelName ?? actorOrModel;
+                string reexportDir = positional.Length > 2
+                    ? positional[2]
+                    : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                                   "Marrow", "cache", resolved);
+                Directory.CreateDirectory(reexportDir);
+                Console.WriteLine($"[reexport] {actorOrModel} -> model '{resolved}' -> {reexportDir}");
+                ExportTestBench.ExportModel(romfsRoot, resolved, reexportDir, actor?.AnimPackNames);
+                return;
+            }
+
             if (args.Contains("--inspect-skeleton"))
             {
                 string model = positional.Length > 1 ? positional[1] : "Enemy_Giant";

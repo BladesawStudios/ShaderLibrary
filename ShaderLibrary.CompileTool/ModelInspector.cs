@@ -29,11 +29,22 @@ namespace ShaderLibrary.CompilerTool
             var skel = model.Skeleton;
 
             Matrix4x4[] world = ExportTestBench.BoneWorldMatrices(skel);
-            Console.WriteLine($"\n--- SKELETON ({skel.BoneList.Count} bones, MatrixToBoneList={skel.MatrixToBoneList?.Count ?? 0}) ---");
+            int smoothCount = skel.BoneList.Count(b => b.SmoothMatrixIndex >= 0);
+            int rigidCount = skel.BoneList.Count(b => b.RigidMatrixIndex >= 0);
+            Console.WriteLine($"\n--- SKELETON ({skel.BoneList.Count} bones) ---");
+            // MatrixToBoneList spans BOTH palette segments and InverseModelMatrices only the smooth
+            // one, so "inverse count < list count" is the normal case - it is the split, not a
+            // truncated file. See ExportTestBench.ExportSkeleton for the Ghidra citations.
+            Console.WriteLine($"  Scaling={skel.FlagsScaling} (mode {ExportTestBench.ScalingMode(skel)})  Rotation={skel.FlagsRotation}");
+            Console.WriteLine($"  Palette: {smoothCount} smooth + {rigidCount} rigid = {smoothCount + rigidCount} slots" +
+                $" | MatrixToBoneList={skel.MatrixToBoneList?.Count ?? 0} | InverseModelMatrices={skel.InverseModelMatrices?.Count ?? 0}");
+            int sscCount = skel.BoneList.Count(ExportTestBench.SegmentScaleCompensate);
+            int scaledCount = skel.BoneList.Count(b => b.Scale.X != 1f || b.Scale.Y != 1f || b.Scale.Z != 1f);
+            Console.WriteLine($"  Bones with segment-scale-compensate: {sscCount} | with non-unit bind scale: {scaledCount}");
             for (int i = 0; i < skel.BoneList.Count; i++)
             {
                 var b = skel.BoneList[i];
-                Console.WriteLine($"  Bone[{i:D2}]: \"{b.Name}\" Parent={b.ParentIndex} SmoothIdx={b.SmoothMatrixIndex} RigidIdx={b.RigidMatrixIndex} Pos=({b.Position.X:F3}, {b.Position.Y:F3}, {b.Position.Z:F3}) Rot=({b.Rotation.X:F3}, {b.Rotation.Y:F3}, {b.Rotation.Z:F3}, {b.Rotation.W:F3}) RotFlag={b.FlagsRotation}");
+                Console.WriteLine($"  Bone[{i:D2}]: \"{b.Name}\" Parent={b.ParentIndex} SmoothIdx={b.SmoothMatrixIndex} RigidIdx={b.RigidMatrixIndex} Billboard={b.BillboardIndex} SSC={ExportTestBench.SegmentScaleCompensate(b)} Scale=({b.Scale.X:F3}, {b.Scale.Y:F3}, {b.Scale.Z:F3}) Pos=({b.Position.X:F3}, {b.Position.Y:F3}, {b.Position.Z:F3}) Rot=({b.Rotation.X:F3}, {b.Rotation.Y:F3}, {b.Rotation.Z:F3}, {b.Rotation.W:F3}) RotFlag={b.FlagsRotation}");
             }
             if (skel.MatrixToBoneList != null)
                 Console.WriteLine($"MatrixToBoneList: [{string.Join(", ", skel.MatrixToBoneList)}]");

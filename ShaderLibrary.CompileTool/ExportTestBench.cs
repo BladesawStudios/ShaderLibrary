@@ -23,22 +23,33 @@ namespace ShaderLibrary.CompileTool
         }
 
         /// <summary>
-        /// World-space matrix per bone, from the skeleton's local TRS walked down the hierarchy.
+        /// World-space matrix per bone, from the skeleton's local TRS walked down the hierarchy -
+        /// the exact walk <c>nn::g3d2::SkeletonObj::CalculateWorldImpl</c> performs (Ghidra:
+        /// NoScale 0x7100080b40, Standard 0x7100080d00, Maya 0x7100080f2c; picked by
+        /// <c>CalculateWorldMtx</c> 0x710008246c from <c>(ResSkeleton.flags &gt;&gt; 8) &amp; 3</c>,
+        /// i.e. <see cref="Skeleton.FlagsScaling"/>). Row-vector convention throughout:
+        /// <c>world = Scale * Rotate * Translate * parentWorld</c>.
         ///
-        /// WHY: a shape's vertex positions are NOT always in model space. BFRES stores them in
-        /// the space implied by the shape's binding:
+        /// The three modes differ ONLY in how scale propagates:
+        ///   None (0)      - the local scale is never applied at all.
+        ///   Standard (1)  - scale multiplies world rows 0/1/2 by scale.x/y/z after the parent multiply.
+        ///   Maya (2)      - same, plus SEGMENT SCALE COMPENSATE: a child whose bone flag bit 23 is
+        ///                   set divides its parent's world rows 0/1/2 by the PARENT'S OWN LOCAL
+        ///                   scale before composing, so the parent's scale does not cascade.
+        /// Softimage (3) is treated as Maya (TotK ships Standard/Maya only; the game's own dispatch
+        /// table at 0x71041da970 has no fourth non-billboard entry).
+        ///
+        /// WHY the world matrices matter for geometry export: a shape's vertex positions are NOT
+        /// always in model space. BFRES stores them in the space implied by the shape's binding:
         ///   VertexSkinCount == 0  rigid       - positions are in BONE space (Shape.BoneIndex)
         ///   VertexSkinCount == 1  single-bind - positions are in BONE space (per-vertex index)
         ///   VertexSkinCount >= 2  smooth      - positions are already in model/bind space
-        /// The bench treated everything as model space, so every rigid part of a model landed at
-        /// the origin's orientation instead of where its bone puts it - horns, eyes and armour
-        /// pieces scattered away from the body. Baking the bone matrix into the exported
-        /// positions puts every shape in one common space, which is also what makes the viewer's
-        /// model rotation apply uniformly.
+        /// Only skin count 0 is baked here; everything else is skinned on the GPU every frame.
         /// </summary>
         public static Matrix4x4[] BoneWorldMatrices(Skeleton skel)
         {
             var bones = skel.BoneList;
+            int mode = ScalingMode(skel);
             var world = new Matrix4x4[bones.Count];
             for (int i = 0; i < bones.Count; i++)
             {
@@ -50,31 +61,96 @@ namespace ShaderLibrary.CompileTool
                       * Matrix4x4.CreateRotationY(b.Rotation.Y)
                       * Matrix4x4.CreateRotationZ(b.Rotation.Z);
 
-                Matrix4x4 local = Matrix4x4.CreateScale(b.Scale.X, b.Scale.Y, b.Scale.Z)
-                                  * rot
-                                  * Matrix4x4.CreateTranslation(b.Position.X, b.Position.Y, b.Position.Z);
+                Matrix4x4 translate = Matrix4x4.CreateTranslation(b.Position.X, b.Position.Y, b.Position.Z);
+                Matrix4x4 local = mode == 0
+                    ? rot * translate
+                    : Matrix4x4.CreateScale(b.Scale.X, b.Scale.Y, b.Scale.Z) * rot * translate;
 
                 // Parents always precede children in a BFRES skeleton, so one forward pass is
                 // enough - no recursion needed.
-                world[i] = b.ParentIndex >= 0 && b.ParentIndex < i
-                    ? local * world[b.ParentIndex]
-                    : local;
+                if (b.ParentIndex < 0 || b.ParentIndex >= i)
+                {
+                    world[i] = local;
+                    continue;
+                }
+
+                Matrix4x4 parent = world[b.ParentIndex];
+                if (mode >= 2 && SegmentScaleCompensate(b))
+                {
+                    var ps = bones[b.ParentIndex].Scale;
+                    parent = DescaleRows(parent, ps.X, ps.Y, ps.Z);
+                }
+                world[i] = local * parent;
             }
             return world;
         }
 
+        /// <summary>0 = None, 1 = Standard, 2 = Maya, 3 = Softimage - <c>(FSKL.flags &gt;&gt; 8) &amp; 3</c>, the same value the game switches on.</summary>
+        public static int ScalingMode(Skeleton skel) => ((int)skel.FlagsScaling >> 8) & 3;
+
+        /// <summary>
+        /// Divides a world matrix's three basis rows by <paramref name="sx"/>/<paramref name="sy"/>/
+        /// <paramref name="sz"/>, leaving its translation row alone - the segment-scale-compensate
+        /// step <c>CalculateWorldImpl&lt;CalculateWorldMaya&gt;</c> applies to a bone's PARENT before
+        /// composing (it reciprocates the parent's local scale and scales the parent's world rows).
+        /// </summary>
+        public static Matrix4x4 DescaleRows(Matrix4x4 m, float sx, float sy, float sz)
+        {
+            if (sx == 1f && sy == 1f && sz == 1f)
+                return m;
+            float ix = sx != 0f ? 1f / sx : 0f;
+            float iy = sy != 0f ? 1f / sy : 0f;
+            float iz = sz != 0f ? 1f / sz : 0f;
+            m.M11 *= ix; m.M12 *= ix; m.M13 *= ix;
+            m.M21 *= iy; m.M22 *= iy; m.M23 *= iy;
+            m.M31 *= iz; m.M32 *= iz; m.M33 *= iz;
+            return m;
+        }
+
+        static readonly System.Reflection.FieldInfo? BoneRawFlagsField = typeof(Bone).GetField(
+            "_flags", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        /// <summary>
+        /// Bone flag bit 23 (0x800000). <see cref="BfresLibrary.BoneFlagsTransform"/> masks it out
+        /// entirely (it only models 0xF000000), so read the raw flags word the loader kept - the
+        /// game masks the very same bit into its per-bone local-matrix flags
+        /// (<c>SkeletonObj::ClearLocalMtx</c> 0x7100ad6978: <c>ResBone[0x2C] &amp; 0x0F870000</c>) and
+        /// tests it in the Maya walk.
+        /// </summary>
+        public static bool SegmentScaleCompensate(Bone b) =>
+            BoneRawFlagsField != null && ((uint)BoneRawFlagsField.GetValue(b)! & 0x800000) != 0;
+
         /// <summary>
         /// Writes <c>&lt;modelName&gt;.skeleton.json</c> - everything Marrow's runtime needs to
-        /// build the real gsys_skeleton palette itself (bind-pose local TRS per bone, plus the
-        /// smooth/rigid matrix-list tables from <see cref="BfresLibrary.Skeleton"/>) instead of
-        /// this exporter baking one fixed pose into vertex positions. Skipped (with a log line, not
-        /// a failure) for a model with no bones at all - not every shape needs a skeleton.
+        /// build the real gsys_skeleton palette itself (bind-pose local TRS per bone, the skeleton's
+        /// scaling mode, and the smooth/rigid matrix tables from <see cref="BfresLibrary.Skeleton"/>)
+        /// instead of this exporter baking one fixed pose into vertex positions. Skipped (with a log
+        /// line, not a failure) for a model with no bones at all.
         ///
-        /// The real per-slot skinning matrix - <c>InverseModelMatrix * BoneWorld</c> for the
-        /// smooth segment, <c>BoneWorld</c> directly (no inverse-bind multiply) for the rigid
-        /// segment - is built at RUNTIME from this file by
-        /// <c>Marrow.Shaders.Profiles.Totk.Ubos.BonePaletteUbo.Build</c> (see its remarks for the
-        /// full Ghidra citation); nothing here computes a bone matrix any more.
+        /// THE PALETTE IS TWO SEGMENTS, AND <c>MatrixToBoneList</c> COVERS BOTH. Verified against
+        /// <c>nn::g3d2::SkeletonObj::CalculateSkeleton</c> (Ghidra 0x71000824a8) and
+        /// <c>SetupBlockBufferImpl</c> (0x7100081dfc):
+        ///   - the buffer is <c>(FSKL[0x3A] + FSKL[0x3C]) * 0x30</c> bytes - smoothCount + rigidCount
+        ///     mat3x4 entries;
+        ///   - <c>FSKL[0x18]</c> (BfresLibrary's <c>Skeleton.MatrixToBoneList</c>) is ONE s16 array of
+        ///     smoothCount + rigidCount entries, read as <c>list[i]</c> for the smooth segment and
+        ///     <c>list[smoothCount + j]</c> for the rigid one;
+        ///   - <c>FSKL[0x20]</c> (<c>Skeleton.InverseModelMatrices</c>) holds exactly smoothCount
+        ///     entries and is consumed in lock-step with the smooth half only.
+        /// So <c>InverseModelMatrices.Count &lt; MatrixToBoneList.Count</c> is NORMAL, not a truncated
+        /// file: the difference IS the rigid segment. Treating the whole list as smooth (which this
+        /// exporter used to do) both inflates smoothCount and invents inverse-bind matrices for rigid
+        /// slots - the mechanism behind rigid parts sitting still inside an otherwise moving mesh.
+        ///
+        /// <c>Bone.RigidMatrixIndex</c> is an ABSOLUTE palette index, already offset past the smooth
+        /// segment - e.g. Animal_Bass has 4 smooth slots and its Head bone reports
+        /// <c>SmoothMatrixIndex 0, RigidMatrixIndex 4</c>, with <c>MatrixToBoneList[4]</c> pointing
+        /// back at Head. Nothing may add smoothCount to it a second time.
+        ///
+        /// The real per-slot skinning matrix - <c>InverseModelMatrix * BoneWorld</c> for the smooth
+        /// segment, <c>BoneWorld</c> directly (no inverse-bind multiply) for the rigid segment - is
+        /// built at RUNTIME from this file by
+        /// <c>Marrow.Shaders.Profiles.Totk.Ubos.BonePaletteUbo.Build</c>.
         /// </summary>
         public static void ExportSkeleton(Skeleton skel, string outPath)
         {
@@ -84,8 +160,31 @@ namespace ShaderLibrary.CompileTool
                 return;
             }
 
+            var matrixToBoneList = skel.MatrixToBoneList ?? [];
+            var inverseModelMatrices = skel.InverseModelMatrices ?? [];
+
+            // A bone carries its own slot number in each segment (-1 = "not in this segment"), so
+            // counting them is the most direct read of the two ushort counts the FSKL header stores
+            // and the game's CalculateSkeleton loops on.
+            int smoothCount = skel.BoneList.Count(b => b.SmoothMatrixIndex >= 0);
+            int rigidCount = skel.BoneList.Count(b => b.RigidMatrixIndex >= 0);
+            if (smoothCount + rigidCount != matrixToBoneList.Count)
+            {
+                Console.WriteLine($"[ExportTestBench] WARNING: {skel.BoneList.Count} bones give " +
+                    $"{smoothCount} smooth + {rigidCount} rigid slots but MatrixToBoneList has " +
+                    $"{matrixToBoneList.Count} entries - falling back to InverseModelMatrices' length for the split.");
+                if (inverseModelMatrices.Count > 0 && inverseModelMatrices.Count <= matrixToBoneList.Count)
+                    smoothCount = inverseModelMatrices.Count;
+                smoothCount = Math.Min(smoothCount, matrixToBoneList.Count);
+                rigidCount = matrixToBoneList.Count - smoothCount;
+            }
+
+            int scalingMode = ScalingMode(skel);
             var sb = new StringBuilder();
             sb.AppendLine("{");
+            sb.AppendLine($"  \"scaling_mode\": {scalingMode},");
+            sb.AppendLine($"  \"smooth_matrix_count\": {smoothCount},");
+            sb.AppendLine($"  \"rigid_matrix_count\": {rigidCount},");
             sb.AppendLine("  \"bones\": [");
             for (int i = 0; i < skel.BoneList.Count; i++)
             {
@@ -95,6 +194,8 @@ namespace ShaderLibrary.CompileTool
                 sb.AppendLine($"      \"parent_index\": {b.ParentIndex},");
                 sb.AppendLine($"      \"smooth_matrix_index\": {b.SmoothMatrixIndex},");
                 sb.AppendLine($"      \"rigid_matrix_index\": {b.RigidMatrixIndex},");
+                sb.AppendLine($"      \"billboard_index\": {b.BillboardIndex},");
+                sb.AppendLine($"      \"segment_scale_compensate\": {(SegmentScaleCompensate(b) ? "true" : "false")},");
                 sb.AppendLine($"      \"scale\": [{F(b.Scale.X)}, {F(b.Scale.Y)}, {F(b.Scale.Z)}],");
                 sb.AppendLine($"      \"rotation\": [{F(b.Rotation.X)}, {F(b.Rotation.Y)}, {F(b.Rotation.Z)}, {F(b.Rotation.W)}],");
                 sb.AppendLine($"      \"rotation_is_quaternion\": {(b.FlagsRotation == BoneFlagsRotation.Quaternion ? "true" : "false")},");
@@ -103,22 +204,15 @@ namespace ShaderLibrary.CompileTool
             }
             sb.AppendLine("  ],");
 
-            var matrixToBoneList = skel.MatrixToBoneList ?? [];
             sb.AppendLine($"  \"matrix_to_bone_list\": [{string.Join(", ", matrixToBoneList)}],");
 
-            // Not every BFRES version stores one inverse-bind matrix per smooth slot in
-            // Skeleton.InverseModelMatrices (this model's has fewer entries than
-            // MatrixToBoneList, or is null outright for a model with no smooth skinning at all) -
-            // for any slot missing one, derive it the only way that's always correct: the inverse
-            // of that bone's OWN bind-pose world matrix (mathematically identical to what the real
-            // InverseModelMatrices entry would be, since it exists specifically to undo that
-            // bone's own bind pose).
-            var inverseModelMatrices = skel.InverseModelMatrices ?? [];
-            Matrix4x4[]? bindWorld = matrixToBoneList.Count > inverseModelMatrices.Count
-                ? BoneWorldMatrices(skel) : null;
+            // One inverse-bind matrix per SMOOTH slot, and no more. A BFRES that stores fewer than
+            // smoothCount of them gets the only always-correct substitute: the inverse of that bone's
+            // own bind-pose world matrix, which is exactly what the stored entry undoes.
+            Matrix4x4[]? bindWorld = smoothCount > inverseModelMatrices.Count ? BoneWorldMatrices(skel) : null;
 
             sb.AppendLine("  \"inverse_model_matrices\": [");
-            for (int i = 0; i < matrixToBoneList.Count; i++)
+            for (int i = 0; i < smoothCount; i++)
             {
                 Matrix4x4 inv;
                 if (i < inverseModelMatrices.Count)
@@ -129,7 +223,7 @@ namespace ShaderLibrary.CompileTool
                 }
                 else
                 {
-                    int bone = matrixToBoneList[i];
+                    int bone = i < matrixToBoneList.Count ? matrixToBoneList[i] : -1;
                     if (bone < 0 || bone >= bindWorld!.Length || !Matrix4x4.Invert(bindWorld[bone], out var invNative))
                     {
                         inv = Matrix4x4.Identity;
@@ -151,13 +245,14 @@ namespace ShaderLibrary.CompileTool
                 sb.Append($"    [{F(inv.M11)}, {F(inv.M12)}, {F(inv.M13)}, {F(inv.M14)}, " +
                           $"{F(inv.M21)}, {F(inv.M22)}, {F(inv.M23)}, {F(inv.M24)}, " +
                           $"{F(inv.M31)}, {F(inv.M32)}, {F(inv.M33)}, {F(inv.M34)}]");
-                sb.AppendLine(i == matrixToBoneList.Count - 1 ? "" : ",");
+                sb.AppendLine(i == smoothCount - 1 ? "" : ",");
             }
             sb.AppendLine("  ]");
             sb.AppendLine("}");
 
             File.WriteAllText(outPath, sb.ToString());
-            Console.WriteLine($"[ExportTestBench] Exported skeleton ({skel.BoneList.Count} bones, {matrixToBoneList.Count} smooth matrices) -> {outPath}");
+            Console.WriteLine($"[ExportTestBench] Exported skeleton ({skel.BoneList.Count} bones, " +
+                $"{smoothCount} smooth + {rigidCount} rigid matrices, scaling mode {scalingMode}) -> {outPath}");
 
             static string F(float v) => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
         }
@@ -167,12 +262,31 @@ namespace ShaderLibrary.CompileTool
         /// one embedded <see cref="SkeletalAnim"/>'s curves (already-decoded floats regardless of
         /// on-disk compression - see <c>AnimCurve.FrameType</c>/<c>KeyType</c>'s own remarks), for
         /// Marrow's runtime to evaluate itself every frame rather than this exporter baking one
-        /// fixed pose. <c>AnimCurve.AnimDataOffset</c> says which bone TRS component each curve
-        /// drives (confirmed via <see cref="BoneAnimDataOffset"/>'s own values: 4/8/12 =
-        /// Scale.X/Y/Z, 16/20/24 = Translate.X/Y/Z, 32/36/40/44 = Rotate.X/Y/Z/W) - the curve math
-        /// itself (Cubic/Linear/BakedFloat) is confirmed against the running game via Ghidra
-        /// (<c>nn::g3d2::ResAnimCurve::Evaluate{Cubic,Linear,BakedFloat}&lt;float&gt;</c>) and lives
-        /// in <c>Marrow.Core.Rendering.SkeletonPose</c>, not duplicated here.
+        /// fixed pose. The curve math itself (Cubic/Linear/BakedFloat) lives in
+        /// <c>Marrow.Core.Rendering.SkeletonPose</c>, not duplicated here.
+        ///
+        /// Two fields here are easy to get wrong and were, until verified in Ghidra:
+        ///
+        /// <c>"offset"</c> is <see cref="AnimCurve.Offset"/>, NOT <see cref="AnimCurve.Delta"/>.
+        /// <c>nn::g3d2::ResAnimCurve::EvaluateFloat</c> (0x7100073d90) finishes every curve with
+        /// <c>ResAnimCurve[0x24] + raw * ResAnimCurve[0x20]</c> - that is Offset + raw * Scale.
+        /// <c>Delta</c> is the separate field at 0x28 that only the RELATIVE-REPEAT wrap mode adds
+        /// per loop iteration, and it is 0 on essentially every curve. Exporting Delta as if it were
+        /// Offset drops each curve's base value: a rotation curve whose quantized keys wobble +-0.07
+        /// rad around a -1.49 rad bind angle instead swings the bone to +-0.07 rad absolute, which
+        /// reads as limbs snapping to a wrong axis rather than as "the animation is subtly off".
+        ///
+        /// <c>"rotation_is_quaternion"</c> comes from <see cref="SkeletalAnim.FlagsRotate"/>.
+        /// <c>SkeletalAnimObj::ApplyTo</c> (0x710007a93c) dispatches on
+        /// <c>(FSKA.flags &gt;&gt; 12) &amp; 7</c>: 0 picks the quaternion path, 1 picks
+        /// <c>ApplyToImpl&lt;nn::g3d::EulerToMtx&gt;</c> (0x710007a1a0). For a Euler anim,
+        /// <c>base_rotate</c> and curve offsets 32/36/40 are XYZ RADIANS and the W slot is unused -
+        /// feeding those three into a quaternion constructor yields a normalized garbage rotation.
+        ///
+        /// <c>AnimCurve.AnimDataOffset</c> says which bone TRS component each curve drives, and the
+        /// mapping is confirmed by the byte offsets <c>ApplyToImpl</c> reads out of its per-bone
+        /// result struct: 4/8/12 = Scale.X/Y/Z, 16/20/24 = Translate.X/Y/Z, 32/36/40/44 =
+        /// Rotate.X/Y/Z/W.
         /// </summary>
         public static void ExportSkeletalAnim(SkeletalAnim anim, string outPath)
         {
@@ -181,6 +295,8 @@ namespace ShaderLibrary.CompileTool
             sb.AppendLine($"  \"name\": \"{anim.Name}\",");
             sb.AppendLine($"  \"frame_count\": {anim.FrameCount},");
             sb.AppendLine($"  \"loop\": {(anim.Loop ? "true" : "false")},");
+            sb.AppendLine($"  \"rotation_is_quaternion\": {(anim.FlagsRotate == SkeletalAnimFlagsRotate.Quaternion ? "true" : "false")},");
+            sb.AppendLine($"  \"scaling_mode\": {((int)anim.FlagsScale >> 8) & 3},");
             sb.AppendLine("  \"bone_anims\": [");
             for (int bi = 0; bi < anim.BoneAnims.Count; bi++)
             {
@@ -190,6 +306,7 @@ namespace ShaderLibrary.CompileTool
                 sb.AppendLine($"      \"use_scale\": {(ba.UseScale ? "true" : "false")},");
                 sb.AppendLine($"      \"use_rotate\": {(ba.UseRotation ? "true" : "false")},");
                 sb.AppendLine($"      \"use_translate\": {(ba.UseTranslation ? "true" : "false")},");
+                sb.AppendLine($"      \"segment_scale_compensate\": {(ba.ApplySegmentScaleCompensate ? "true" : "false")},");
                 sb.AppendLine($"      \"base_scale\": [{F(ba.BaseData.Scale.X)}, {F(ba.BaseData.Scale.Y)}, {F(ba.BaseData.Scale.Z)}],");
                 sb.AppendLine($"      \"base_translate\": [{F(ba.BaseData.Translate.X)}, {F(ba.BaseData.Translate.Y)}, {F(ba.BaseData.Translate.Z)}],");
                 sb.AppendLine($"      \"base_rotate\": [{F(ba.BaseData.Rotate.X)}, {F(ba.BaseData.Rotate.Y)}, {F(ba.BaseData.Rotate.Z)}, {F(ba.BaseData.Rotate.W)}],");
@@ -203,7 +320,10 @@ namespace ShaderLibrary.CompileTool
                     sb.AppendLine($"          \"start_frame\": {F(c.StartFrame)},");
                     sb.AppendLine($"          \"end_frame\": {F(c.EndFrame)},");
                     sb.AppendLine($"          \"scale\": {F(c.Scale)},");
+                    sb.AppendLine($"          \"offset\": {F(c.Offset)},");
                     sb.AppendLine($"          \"delta\": {F(c.Delta)},");
+                    sb.AppendLine($"          \"pre_wrap\": {(int)c.PreWrap},");
+                    sb.AppendLine($"          \"post_wrap\": {(int)c.PostWrap},");
                     sb.AppendLine($"          \"frames\": [{string.Join(", ", c.Frames.Select(F))}],");
                     var keyRows = new List<string>();
                     for (int k = 0; k < c.Keys.GetLength(0); k++)
@@ -393,25 +513,18 @@ namespace ShaderLibrary.CompileTool
                 // How this shape's vertices get posed (see the remark above the `world` build):
                 //   skin count 0 (rigid)       - every vertex shares one BAKED matrix: world[Shape.BoneIndex] directly
                 //                                 (bone-local positions, no inverse-bind - confirmed via Ghidra).
-                //   skin count 1 (single-bind) - real GPU skin. The shape's own _i0.x is NOT a bone id and NOT an index
-                //                                 into Shape.SkinBoneIndices (confirmed by dumping the real per-vertex
-                //                                 values: they equal the target bone's own RigidMatrixIndex directly, e.g.
-                //                                 464/465 for a model whose Eyeball_L/R bones have RigidMatrixIndex 464/465 -
-                //                                 far past SkinBoneIndices' own length, and NOT the bone's raw index either).
-                //                                 So the real palette slot is just smoothCount + _i0.x, no bone lookup at
-                //                                 all. Using SkinBoneIndices/the bone id here (an earlier, untested
-                //                                 assumption) silently fell through to slot 0 for every single-bind vertex,
-                //                                 which happens to be near-identity at bind pose for both test models - the
-                //                                 actual mechanism behind eyes rendering unrotated/unmoved ("inside the
-                //                                 head", "rotated 90") instead of at their real bone.
-                //   skin count >= 2 (smooth)   - real GPU skin, real per-vertex weights + PALETTE SLOT indices. The shape's
-                //                                 own _i0/_i1 values ARE already smooth-segment slot numbers (MatrixToBoneList's
-                //                                 own index space) - used as-is, no remap needed.
+                //   skin count >= 1            - real GPU skin. _i0/_i1 are ABSOLUTE indices into the combined
+                //                                 smooth+rigid palette that CalculateSkeleton fills, in BOTH the
+                //                                 single-bind and the smooth case - not bone ids, and not indices
+                //                                 into Shape.SkinBoneIndices. A single-bind shape's _i0.x equals the
+                //                                 target bone's own Bone.RigidMatrixIndex, and that field is itself
+                //                                 already offset past the smooth segment (Animal_Bass: 4 smooth slots,
+                //                                 Head reports RigidMatrixIndex 4, MatrixToBoneList[4] == Head). So
+                //                                 nothing may add smoothCount to these values - doing so pushed every
+                //                                 single-bind vertex past the end of the real palette into whatever the
+                //                                 identity fill left there.
                 bool rigidBake = shape.VertexSkinCount == 0;
-                bool smooth = shape.VertexSkinCount >= 2;
                 Matrix4x4 rigid = rigidBake && shape.BoneIndex < world.Length ? world[shape.BoneIndex] : Matrix4x4.Identity;
-
-                int smoothCount = model.Skeleton.MatrixToBoneList?.Count ?? 0;
 
                 var normals = helper.Contains("_n0") ? helper["_n0"].Data : null;
                 var uvs = helper.Contains("_u0") ? helper["_u0"].Data : null;
@@ -475,22 +588,16 @@ namespace ShaderLibrary.CompileTool
                         bw.Write(w0x); bw.Write(w0y); bw.Write(w0z); bw.Write(w0w);
                         bw.Write(w1x); bw.Write(w1y); bw.Write(w1z); bw.Write(w1w);
 
-                        // 7-8. Bone indices (ivec4 x 2) - real PALETTE slots for skin count >= 1:
-                        // smooth's own _i0/_i1 values ARE already smooth-segment slot numbers, used
-                        // as-is; single-bind's own _i0.x is ALREADY that bone's RigidMatrixIndex
-                        // directly (confirmed against real vertex data - not a bone id, not an
-                        // index into SkinBoneIndices), so just offset by the smooth segment's
-                        // length. Unused padding for a baked rigid shape (skin count 0), whose
-                        // compiled shader has no _Mtx at all to read this from.
+                        // 7-8. Bone indices (ivec4 x 2) - real PALETTE slots for skin count >= 1,
+                        // copied through verbatim: BFRES already stores absolute indices into the
+                        // combined smooth+rigid palette for both single-bind and smooth shapes (see
+                        // the per-shape resolution above). Unused padding for a baked rigid shape
+                        // (skin count 0), whose compiled shader has no _Mtx at all to read this from.
                         int i0x = 0, i0y = 0, i0z = 0, i0w = 0, i1x = 0, i1y = 0, i1z = 0, i1w = 0;
-                        if (smooth)
+                        if (!rigidBake)
                         {
                             if (boneIdx0 != null) { i0x = (int)boneIdx0[i].X; i0y = (int)boneIdx0[i].Y; i0z = (int)boneIdx0[i].Z; i0w = (int)boneIdx0[i].W; }
                             if (boneIdx1 != null) { i1x = (int)boneIdx1[i].X; i1y = (int)boneIdx1[i].Y; i1z = (int)boneIdx1[i].Z; i1w = (int)boneIdx1[i].W; }
-                        }
-                        else if (!rigidBake)
-                        {
-                            i0x = smoothCount + (boneIdx0 != null ? (int)boneIdx0[i].X : 0);
                         }
                         bw.Write(i0x); bw.Write(i0y); bw.Write(i0z); bw.Write(i0w);
                         bw.Write(i1x); bw.Write(i1y); bw.Write(i1z); bw.Write(i1w);

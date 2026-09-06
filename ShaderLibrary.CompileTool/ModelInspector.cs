@@ -29,28 +29,43 @@ namespace ShaderLibrary.CompilerTool
             var skel = model.Skeleton;
 
             Matrix4x4[] world = ExportTestBench.BoneWorldMatrices(skel);
-            int eyeBone = skel.MatrixToBoneList[95];
-            Console.WriteLine($"\n--- EYEBALL BONE TRANSFORM ---");
-            Console.WriteLine($"Eye bone index: {eyeBone} (\"{skel.BoneList[eyeBone].Name}\")");
-            int curr = eyeBone;
-            while (curr >= 0)
+            Console.WriteLine($"\n--- SKELETON ({skel.BoneList.Count} bones, MatrixToBoneList={skel.MatrixToBoneList?.Count ?? 0}) ---");
+            for (int i = 0; i < skel.BoneList.Count; i++)
             {
-                var b = skel.BoneList[curr];
-                Console.WriteLine($"  Bone[{curr:D2}]: \"{b.Name}\" Pos=({b.Position.X:F3}, {b.Position.Y:F3}, {b.Position.Z:F3}) Rot=({b.Rotation.X:F3}, {b.Rotation.Y:F3}, {b.Rotation.Z:F3}, {b.Rotation.W:F3}) RotFlag={b.FlagsRotation}");
-                curr = b.ParentIndex;
+                var b = skel.BoneList[i];
+                Console.WriteLine($"  Bone[{i:D2}]: \"{b.Name}\" Parent={b.ParentIndex} SmoothIdx={b.SmoothMatrixIndex} RigidIdx={b.RigidMatrixIndex} Pos=({b.Position.X:F3}, {b.Position.Y:F3}, {b.Position.Z:F3}) Rot=({b.Rotation.X:F3}, {b.Rotation.Y:F3}, {b.Rotation.Z:F3}, {b.Rotation.W:F3}) RotFlag={b.FlagsRotation}");
             }
-            Matrix4x4 eyeMtx = world[eyeBone];
-            Console.WriteLine($"Eye World Matrix Translation: ({eyeMtx.M41:F3}, {eyeMtx.M42:F3}, {eyeMtx.M43:F3})");
+            if (skel.MatrixToBoneList != null)
+                Console.WriteLine($"MatrixToBoneList: [{string.Join(", ", skel.MatrixToBoneList)}]");
 
-            var eyeShape = model.Shapes.Values.First(s => s.Name.Contains("Eye"));
-            var eyeVb = model.VertexBuffers[eyeShape.VertexBufferIndex];
-            var eyeHelper = new VertexBufferHelper(eyeVb, res.ByteOrder);
-            var eyeRawP = eyeHelper["_p0"].Data;
-            var eyeTransformed = eyeRawP.Select(p => Vector3.Transform(new Vector3(p.X, p.Y, p.Z), eyeMtx)).ToList();
-            float eMinX = eyeTransformed.Min(v => v.X), eMaxX = eyeTransformed.Max(v => v.X);
-            float eMinY = eyeTransformed.Min(v => v.Y), eMaxY = eyeTransformed.Max(v => v.Y);
-            float eMinZ = eyeTransformed.Min(v => v.Z), eMaxZ = eyeTransformed.Max(v => v.Z);
-            Console.WriteLine($"Transformed Eyeball with Bone[{eyeBone}]: X=[{eMinX:F3}, {eMaxX:F3}] Y=[{eMinY:F3}, {eMaxY:F3}] Z=[{eMinZ:F3}, {eMaxZ:F3}]");
+            int eyeBone = skel.BoneList.FindIndex(b => b.Name.Contains("Eye", StringComparison.OrdinalIgnoreCase));
+            if (eyeBone >= 0)
+            {
+                Console.WriteLine($"\n--- EYEBALL BONE TRANSFORM ---");
+                Console.WriteLine($"Eye bone index: {eyeBone} (\"{skel.BoneList[eyeBone].Name}\")");
+                int curr = eyeBone;
+                while (curr >= 0)
+                {
+                    var b = skel.BoneList[curr];
+                    Console.WriteLine($"  Bone[{curr:D2}]: \"{b.Name}\" Pos=({b.Position.X:F3}, {b.Position.Y:F3}, {b.Position.Z:F3}) Rot=({b.Rotation.X:F3}, {b.Rotation.Y:F3}, {b.Rotation.Z:F3}, {b.Rotation.W:F3}) RotFlag={b.FlagsRotation}");
+                    curr = b.ParentIndex;
+                }
+                Matrix4x4 eyeMtx = world[eyeBone];
+                Console.WriteLine($"Eye World Matrix Translation: ({eyeMtx.M41:F3}, {eyeMtx.M42:F3}, {eyeMtx.M43:F3})");
+
+                var eyeShape = model.Shapes.Values.FirstOrDefault(s => s.Name.Contains("Eye", StringComparison.OrdinalIgnoreCase));
+                if (eyeShape != null)
+                {
+                    var eyeVb = model.VertexBuffers[eyeShape.VertexBufferIndex];
+                    var eyeHelper = new VertexBufferHelper(eyeVb, res.ByteOrder);
+                    var eyeRawP = eyeHelper["_p0"].Data;
+                    var eyeTransformed = eyeRawP.Select(p => Vector3.Transform(new Vector3(p.X, p.Y, p.Z), eyeMtx)).ToList();
+                    float eMinX = eyeTransformed.Min(v => v.X), eMaxX = eyeTransformed.Max(v => v.X);
+                    float eMinY = eyeTransformed.Min(v => v.Y), eMaxY = eyeTransformed.Max(v => v.Y);
+                    float eMinZ = eyeTransformed.Min(v => v.Z), eMaxZ = eyeTransformed.Max(v => v.Z);
+                    Console.WriteLine($"Transformed Eyeball with Bone[{eyeBone}]: X=[{eMinX:F3}, {eMaxX:F3}] Y=[{eMinY:F3}, {eMaxY:F3}] Z=[{eMinZ:F3}, {eMaxZ:F3}]");
+                }
+            }
 
             Console.WriteLine($"\n--- SHAPES ({model.Shapes.Count} shapes) ---");
             for (int s = 0; s < model.Shapes.Count; s++)

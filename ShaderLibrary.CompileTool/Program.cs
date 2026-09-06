@@ -50,6 +50,13 @@ namespace ShaderLibrary.CompilerTool
                 return;
             }
 
+            if (args.Contains("--inspect-matanim"))
+            {
+                string target = positional.Length > 1 ? positional[1] : "Enemy_Dragon_Darkness";
+                MaterialAnimInspector.Inspect(romfsRoot, target);
+                return;
+            }
+
             if (args.Contains("--inspect-skeleton"))
             {
                 string model = positional.Length > 1 ? positional[1] : "Enemy_Giant";

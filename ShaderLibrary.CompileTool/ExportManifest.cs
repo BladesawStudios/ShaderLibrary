@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using BfresLibrary;
 using EffectLibraryTest;
 using ShaderLibrary;
@@ -154,6 +155,21 @@ namespace ShaderLibrary.CompileTool
                     if (mp >= 0 && decompiled.Add(mp))
                         DecompileProgram(bfsha.ShaderModels[shading].GetVariation(mp).BinaryProgram,
                                          shaderOutDir, $"{shading}_prog{mp}");
+
+                    // Now that every program this shape draws with is decompiled to real GLSL on
+                    // disk, re-write this material's params.json with which of its own typed
+                    // parameters actually appear in that text - see FindUsedParamNames's remarks.
+                    // Harmless to redo per-shape when several shapes share one material: same
+                    // inputs, same (idempotent) output.
+                    if (bfsha.ShaderModels[shading].UniformBlocks.ContainsKey("gsys_material"))
+                    {
+                        var block = bfsha.ShaderModels[shading].UniformBlocks["gsys_material"];
+                        var usedNames = FindUsedParamNames(block, mat, shaderOutDir, shading, gb, zo, mp);
+                        string matSafe = mat.Name.Replace(":", "_").Replace("/", "_");
+                        string paramsPath = Path.Combine(outDir, "matubo", $"{matSafe}.params.json");
+                        if (File.Exists(paramsPath))
+                            BuildMaterialUbo.WriteParamLayout(block, mat, paramsPath, usedNames);
+                    }
                 }
 
                 string behave = ResolveOption(bfsha, shading, mat, "o_material_behave");
@@ -388,6 +404,101 @@ namespace ShaderLibrary.CompileTool
                             $"\"width\": {w}, \"height\": {h} }}");
             }
             return outList;
+        }
+
+        /// <summary>
+        /// Which of this material's own authored (typed) <c>gsys_material</c> parameters are
+        /// actually referenced by the real decompiled shader text this shape draws with (union of
+        /// its G-buffer/Z-only/forward programs, whichever exist) - answers "does editing this
+        /// parameter do anything for THIS shape", the question a live material editor can't answer
+        /// on its own (a parameter can be genuinely dead for one shape's compiled variant while a
+        /// completely different material elsewhere uses the very same block slot for real -
+        /// confirmed for <c>p_miasma_ratio</c>: read by 125 OTHER compiled programs in this game's
+        /// shader corpus, but by neither <c>Enemy_MiasmaTentacle</c>'s nor
+        /// <c>Npc_Ganondorf_Miasma</c>'s own shapes, including ones literally named
+        /// <c>Mt_Breast_Miasma</c>).
+        /// </summary>
+        static HashSet<string> FindUsedParamNames(BfshaUniformBlock block, Material mat, string shaderOutDir, string shading, int gb, int zo, int mp)
+        {
+            var text = new StringBuilder();
+            void AppendIfExists(int progIdx)
+            {
+                if (progIdx < 0)
+                    return;
+                foreach (string ext in new[] { "vert", "frag" })
+                {
+                    string p = Path.Combine(shaderOutDir, $"{shading}_prog{progIdx}_extracted.{ext}");
+                    if (File.Exists(p))
+                        text.Append(File.ReadAllText(p));
+                }
+            }
+            AppendIfExists(gb);
+            AppendIfExists(zo);
+            AppendIfExists(mp);
+            string combined = text.ToString();
+
+            var used = new HashSet<string>(StringComparer.Ordinal);
+            // The "Mat" cbuffer's decompiled GLSL variable name is a naming CONVENTION observed
+            // on every material_prog*/deferred_*_prog* file checked (Ryujinx names it fp_c{binding+3},
+            // and Mat's binding is 8 for every one seen - matches ShapeDrawing's own hardcoded
+            // BindBufferBase(..., 8, ...)), not something recoverable from the BFSHA data itself.
+            // If a program ever doesn't follow it, "used" would wrongly come back empty for every
+            // parameter - so when the marker string is absent from the combined text altogether,
+            // treat every typed parameter as used (show it) rather than silently hiding all of
+            // them on a broken assumption.
+            const string matVar = "fp_c11.data[";
+            if (!combined.Contains(matVar, StringComparison.Ordinal))
+            {
+                foreach (var pEntry in mat.ShaderParams)
+                    if (block.Uniforms.ContainsKey(pEntry.Key))
+                        used.Add(pEntry.Key);
+                return used;
+            }
+
+            foreach (var pEntry in mat.ShaderParams)
+            {
+                string name = pEntry.Key;
+                if (!block.Uniforms.ContainsKey(name))
+                    continue;
+                int offset = BuildMaterialUbo.GetUniformOffset(block.Uniforms[name]);
+                int byteLength = (int)pEntry.Value.DataSize;
+                if (IsReferenced(combined, offset, byteLength))
+                    used.Add(name);
+            }
+            return used;
+        }
+
+        /// <summary>
+        /// Whether any byte this parameter occupies is referenced in the decompiled shader text,
+        /// as <c>fp_c11.data[SLOT]</c> either bare (the whole vec4 passed through - every byte in
+        /// it counts as used) or followed by a swizzle naming this byte's component. A parameter
+        /// larger than one vec4 (matrices, Srt2D/3D, TexSrt/TexSrtEx) is treated as used
+        /// unconditionally - too structurally varied to pattern-match cheaply, and wrongly hiding
+        /// a genuinely-used one is worse than never hiding one of these.
+        /// </summary>
+        static bool IsReferenced(string shaderText, int byteOffset, int byteLength)
+        {
+            if (byteLength > 16)
+                return true;
+            int floatCount = Math.Max(1, byteLength / 4);
+            for (int i = 0; i < floatCount; i++)
+            {
+                int byteAt = byteOffset + i * 4;
+                int slot = byteAt / 16;
+                int comp = (byteAt % 16) / 4;
+                char xyzw = "xyzw"[comp];
+                char rgba = "rgba"[comp];
+
+                foreach (Match m in Regex.Matches(shaderText, $@"fp_c11\.data\[{slot}\](\.[xyzwrgba]+)?"))
+                {
+                    if (!m.Groups[1].Success)
+                        return true; // bare reference - the whole vec4 is used, every component counts
+                    string swizzle = m.Groups[1].Value;
+                    if (swizzle.IndexOf(xyzw) >= 0 || swizzle.IndexOf(rgba) >= 0)
+                        return true;
+                }
+            }
+            return false;
         }
     }
 }

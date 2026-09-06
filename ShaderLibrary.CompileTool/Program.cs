@@ -73,6 +73,19 @@ namespace ShaderLibrary.CompilerTool
                 return;
             }
 
+            // "--rebuild-deferred-materials" rebuilds the SHARED deferred-resolve-pass
+            // gsys_material blocks (chara_skin, chara_hair, ...) into Marrow's cache - see
+            // BuildMaterialUbo.RunSystemDeferred's remarks for why this step was missing from the
+            // pipeline entirely until now. One shared archive/model, not per-model like
+            // --rebuild-matubo above.
+            if (args.Contains("--rebuild-deferred-materials"))
+            {
+                string deferredOutDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                                             "Marrow", "cache", "_deferred_materials");
+                BuildMaterialUbo.RunSystemDeferred(romfsRoot, deferredOutDir);
+                return;
+            }
+
             if (args.Contains("--inspect-matanim"))
             {
                 string target = positional.Length > 1 ? positional[1] : "Enemy_Dragon_Darkness";
@@ -93,6 +106,17 @@ namespace ShaderLibrary.CompilerTool
                     ? positional[1..]
                     : new[] { "Npc_Ganondorf_Miasma_Noise_Gn5", "LeafGray_01_Fca", "Npc_Ganondorf_Miasma_Body_Gn5" };
                 TestTxtg.RunDemo(romfsRoot, names);
+                return;
+            }
+
+            // "--dump-txtg <TextureName> <mip> <outPath>" writes one mip's raw deswizzled block
+            // bytes to disk, for offline analysis of a texture's actual channel content.
+            if (args.Contains("--dump-txtg"))
+            {
+                string texName = positional.Length > 1 ? positional[1] : throw new ArgumentException("need a texture name");
+                int mip = positional.Length > 2 ? int.Parse(positional[2]) : 0;
+                string outPath = positional.Length > 3 ? positional[3] : $"{texName}_mip{mip}.bin";
+                TestTxtg.DumpSurface(romfsRoot, texName, mip, outPath);
                 return;
             }
 

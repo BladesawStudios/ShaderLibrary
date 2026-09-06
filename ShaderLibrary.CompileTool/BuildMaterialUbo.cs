@@ -37,7 +37,6 @@ namespace ShaderLibrary.CompileTool
     {
         public static void Run(string bfshaPath, string bfresMcPath, string outDir)
         {
-            Directory.CreateDirectory(outDir);
             Console.WriteLine("################################################################");
             Console.WriteLine("# Building gsys_material UBOs from romfs");
             Console.WriteLine($"#   shader:  {bfshaPath}");
@@ -52,8 +51,60 @@ namespace ShaderLibrary.CompileTool
                 : File.ReadAllBytes(bfresMcPath);
             using var ms = new MemoryStream(fres);
             var resFile = new ResFile(ms, false);
-            var model = resFile.Models[0];
+            BuildForModel(bfsha, resFile.Models[0], outDir);
+        }
 
+        /// <summary>
+        /// Builds the gsys_material block for every DEFERRED-RESOLVE pass, from the shared
+        /// system shader archive and the shared <c>SystemModel.DeferredMain</c> model - the "Mat"
+        /// block <see cref="Marrow.Core.Pipeline.DeferredResolvePass"/> binds when re-shading a
+        /// G-buffer surface by its <c>o_material_behave</c> bucket (chara_skin, chara_hair, ...).
+        ///
+        /// THIS STEP WAS MISSING FROM <c>ModelPreparer.Prepare</c> ENTIRELY: nothing in the normal
+        /// app pipeline ever wrote a model's `matubo_deferred/` directory, so
+        /// <c>DeferredResolvePass.ResolveDeferredPasses</c>'s <c>File.Exists(matPath)</c> check
+        /// always failed and every deferred-resolve pass ran against an ALL-ZERO material block -
+        /// silently, since an all-zero block still uploads and links fine, it just makes every
+        /// deferred-only parameter (a resolve pass's own rim/tint/miasma/etc. constants - anything
+        /// NOT read directly by the object's own G-buffer program) behave as if it were zero
+        /// regardless of what the object's own per-material params.json says, no matter how
+        /// correct those are. A `--deferred-material-ubo` CLI flag already built this correctly
+        /// once, by hand, against a manually pre-decompressed copy of these two archives sitting
+        /// outside this repo (`TestBench/data/`) - this is that same logic, generalized to
+        /// decompress straight from a real romfs so it does not depend on that copy existing.
+        /// </summary>
+        public static void RunSystemDeferred(string romfsRoot, string outDir)
+        {
+            TotkCommon.Totk.Config.GamePath = romfsRoot;
+
+            string bfshaPath = Path.Combine(romfsRoot, "Shader", "system.Product.110.product.Nin_NX_NVN.bfsha");
+            byte[] bfshaBytes = LoadPossiblyCompressed(bfshaPath);
+            var bfsha = new BfshaFile(new MemoryStream(bfshaBytes));
+
+            string modelPath = Path.Combine(romfsRoot, "Model", "SystemModel.DeferredMain.bfres.mc");
+            if (!File.Exists(modelPath))
+                modelPath = Path.Combine(romfsRoot, "Model", "SystemModel.DeferredMain.bfres");
+            byte[] fres = modelPath.EndsWith(".mc", StringComparison.OrdinalIgnoreCase)
+                ? TestMaterialDump.DecompressBfresMc(modelPath)
+                : File.ReadAllBytes(modelPath);
+            using var ms = new MemoryStream(fres);
+            var resFile = new ResFile(ms, false);
+            BuildForModel(bfsha, resFile.Models[0], outDir);
+        }
+
+        /// <summary>Reads a romfs file that may exist either plain or as its usual zstd-compressed <c>.zs</c> sibling (or both - the plain form, if present, is authoritative and is tried first since it needs no dictionary lookup).</summary>
+        static byte[] LoadPossiblyCompressed(string plainPath)
+        {
+            if (File.Exists(plainPath))
+                return File.ReadAllBytes(plainPath);
+            string zsPath = plainPath + ".zs";
+            byte[] raw = File.ReadAllBytes(zsPath);
+            return TotkCommon.Zstd.IsCompressed(raw) ? TotkCommon.Totk.Zstd.Decompress(raw) : raw;
+        }
+
+        static void BuildForModel(BfshaFile bfsha, Model model, string outDir)
+        {
+            Directory.CreateDirectory(outDir);
             foreach (var matEntry in model.Materials)
             {
                 Material mat = matEntry.Value;
@@ -105,8 +156,25 @@ namespace ShaderLibrary.CompileTool
         /// table, which is the only thing that knows where <c>p_tex_srt1</c> sits in the compiled
         /// block. Emitting the block's whole uniform table (not just the parameters this material
         /// happens to set) means an anim can drive a uniform the material left at its default.
+        ///
+        /// Also carries, for each uniform, the BFRES <c>ShaderParamType</c> the MATERIAL itself
+        /// declares for that name (e.g. "Float4", "Int", "TexSrt") when the material actually
+        /// authors a value for it - omitted (no "type" field) when the uniform sits at the
+        /// shader's own default and no material ShaderParam names it, since then there is no
+        /// authored type to report. This is what lets a live editor pick a sane widget (a colour
+        /// picker for a Float4 named like a colour, a plain slider for a scalar, ...) without
+        /// guessing from the byte layout alone - the compiled block itself carries no component
+        /// count on this platform (BfshaUniform's GX2Type/GX2Count fields are Wii U only and are
+        /// zero here), so the material's own authored type is the only real source for it.
+        ///
+        /// <paramref name="usedNames"/> is filled in separately, later, by
+        /// <c>ExportManifest</c> (which is the step that actually has the material's real
+        /// decompiled shader text to check against - this method runs too early in the pipeline to
+        /// know it) - see that class's <c>FindUsedParamNames</c>. Passing it re-writes this same
+        /// file with a <c>"used"</c> field added per typed uniform; omitting it (the first, earlier
+        /// call from <see cref="Run"/>/<see cref="BuildForModel"/>) leaves every entry without one.
         /// </summary>
-        static void WriteParamLayout(BfshaUniformBlock block, Material mat, string outPath)
+        public static void WriteParamLayout(BfshaUniformBlock block, Material mat, string outPath, IReadOnlySet<string>? usedNames = null)
         {
             var sb = new StringBuilder();
             sb.AppendLine("{");
@@ -117,14 +185,21 @@ namespace ShaderLibrary.CompileTool
             for (int i = 0; i < names.Count; i++)
             {
                 var u = block.Uniforms[names[i]];
-                int off = u.DataOffset == 0 ? u.Index * 4 : u.DataOffset - 1;
-                sb.Append($"    {{ \"name\": \"{names[i]}\", \"offset\": {off} }}");
+                int off = GetUniformOffset(u);
+                string typeField = mat.ShaderParams.TryGetValue(names[i], out ShaderParam? p)
+                    ? $", \"type\": \"{p.Type}\"" : "";
+                string usedField = typeField.Length > 0 && usedNames != null
+                    ? $", \"used\": {(usedNames.Contains(names[i]) ? "true" : "false")}" : "";
+                sb.Append($"    {{ \"name\": \"{names[i]}\", \"offset\": {off}{typeField}{usedField} }}");
                 sb.AppendLine(i == names.Count - 1 ? "" : ",");
             }
             sb.AppendLine("  ]");
             sb.AppendLine("}");
             File.WriteAllText(outPath, sb.ToString());
         }
+
+        /// <summary>BFSHA stores <c>DataOffset</c> 1-based; 0 means "derive from Index * 4". Same convention <c>TestSystemShading.DumpUniformBlocks</c>/<c>ShaderLabelUtil.GetUniformLabels</c> use.</summary>
+        public static int GetUniformOffset(BfshaUniform u) => u.DataOffset == 0 ? u.Index * 4 : u.DataOffset - 1;
 
         /// <summary>
         /// Start from the shader's DefaultBuffer, then overlay every material ShaderParam whose
@@ -140,14 +215,9 @@ namespace ShaderLibrary.CompileTool
             if (block.DefaultBuffer != null && block.DefaultBuffer.Length > 0)
                 Array.Copy(block.DefaultBuffer, buffer, Math.Min(block.DefaultBuffer.Length, size));
 
-            // BFSHA stores DataOffset 1-based; 0 means "derive from Index * 4". Same convention
-            // TestSystemShading.DumpUniformBlocks and ShaderLabelUtil.GetUniformLabels use.
             var blockOffsets = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var u in block.Uniforms)
-            {
-                int off = u.Value.DataOffset == 0 ? u.Value.Index * 4 : u.Value.DataOffset - 1;
-                blockOffsets[u.Key] = off;
-            }
+                blockOffsets[u.Key] = GetUniformOffset(u.Value);
 
             matched = 0;
             missing = 0;

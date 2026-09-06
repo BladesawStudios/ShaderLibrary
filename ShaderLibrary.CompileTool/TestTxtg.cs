@@ -36,5 +36,16 @@ namespace ShaderLibrary.CompileTool
                 }
             }
         }
+
+        /// <summary>Writes one already-deswizzled mip surface's raw block-compressed bytes straight to disk - for offline analysis of a texture's actual channel content when a shader bug is suspected in the format/channel interpretation rather than the deswizzle itself.</summary>
+        public static void DumpSurface(string romfsRoot, string texName, int mip, string outPath)
+        {
+            string texPath = Path.Combine(romfsRoot, "TexToGo", texName + ".txtg");
+            var tex = TxtgTexture.Load(texPath);
+            var surf = tex.Surfaces.Find(s => s.MipLevel == mip && s.ArrayLevel == 0)
+                ?? throw new InvalidOperationException($"no mip {mip} in '{texName}'");
+            File.WriteAllBytes(outPath, surf.Data);
+            Console.WriteLine($"[TXTG] {texName} mip{mip}: format={tex.Format} {Math.Max(1, tex.Width >> mip)}x{Math.Max(1, tex.Height >> mip)} -> {outPath} ({surf.Data.Length} bytes)");
+        }
     }
 }

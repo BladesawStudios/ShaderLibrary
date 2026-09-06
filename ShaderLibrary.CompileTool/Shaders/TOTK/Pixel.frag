@@ -574,8 +574,7 @@ void main()
 	GBufferEncode gbuffer;
 	EncodeGBuffer(normals, spec_mask, metalness, ao, gbuffer);
 
-	base_color.rgb = vec3(1.0, 0.0, 0.0);
-
+	// base_color.rgb = vec3(1.0, 0.0, 0.0);
 	oAlbedoColor.xyz = base_color.rgb; 
 	oAlbedoColor.a = gbuffer.AlbedoAlphaPack;
 

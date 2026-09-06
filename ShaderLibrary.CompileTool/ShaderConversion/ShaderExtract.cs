@@ -37,7 +37,7 @@ namespace EffectLibraryTest
             if (shaderCode == null)
                 return;
 
-            var control_code = new ControlShader(shaderCode.ControlCode);
+            var control_code = new global::ShaderLibrary.ControlShader(shaderCode.ControlCode);
             float[] constants = control_code.GetConstantsAsFloats(shaderCode.ByteCode);
             byte[] raw = control_code.GetConstants(shaderCode.ByteCode);
             File.WriteAllBytes("Constants.bin", raw);
@@ -54,7 +54,7 @@ namespace EffectLibraryTest
 
         public static string GetCode(BnshFile.ShaderCode shaderCode, BnshFile.ShaderReflectionData reflect = null)
         {
-            var control_code = new ControlShader(shaderCode.ControlCode);
+            var control_code = new global::ShaderLibrary.ControlShader(shaderCode.ControlCode);
 
             string code = TegraShaderTranslator.Decompile(shaderCode.ByteCode);
             float[] constants = control_code.GetConstantsAsFloats(shaderCode.ByteCode);
@@ -213,9 +213,16 @@ namespace EffectLibraryTest
 
         static string ApplyConstants(string code, float[] constants)
         {
-            string blockName = "vp_c1_1._m0";
-
-            Dictionary<string, float> constant_lookup = new Dictionary<string, float>();
+            //Ryujinx.Graphics.Shader has used two different naming conventions over time for the
+            //immediate constant buffer (c1, baked directly into the shader ISA rather than bound
+            //as a real uniform block): an older "vp_c1_1._m0[N].swizzle" form, and the current
+            //"vp_c1.data[N].swizzle" / "fp_c1.data[N].swizzle" form (stage-prefixed). Support both
+            //so this keeps working regardless of which decompiler build produced the code -
+            //otherwise these references are left dangling once FixLocations strips the now-"unused"
+            //_vp_c1/_fp_c1 block declaration below, producing GLSL that fails to compile.
+            Dictionary<string, float> constant_lookup_old = new Dictionary<string, float>();
+            Dictionary<string, float> constant_lookup_vp = new Dictionary<string, float>();
+            Dictionary<string, float> constant_lookup_fp = new Dictionary<string, float>();
 
             int index = 0;
             for (int i = 0; i < constants.Length;)
@@ -230,9 +237,9 @@ namespace EffectLibraryTest
 
                     float value = constants[i];
 
-                    //Expected variable name stored in the block
-                    string variable_name = $"{blockName}[{index}].{swizzle}";
-                    constant_lookup.Add(variable_name, value);
+                    constant_lookup_old.Add($"vp_c1_1._m0[{index}].{swizzle}", value);
+                    constant_lookup_vp.Add($"vp_c1.data[{index}].{swizzle}", value);
+                    constant_lookup_fp.Add($"fp_c1.data[{index}].{swizzle}", value);
 
                     swizzle = SwizzleShift(swizzle);
 
@@ -258,7 +265,25 @@ namespace EffectLibraryTest
                         if (line.Contains("vp_c1_1._m0"))
                         {
                             //find variable and replace it
-                            foreach (var var in constant_lookup)
+                            foreach (var var in constant_lookup_old)
+                            {
+                                if (line.Contains(var.Key))
+                                    line = line.Replace(var.Key, var.Value.ToString());
+                            }
+                        }
+                        //current Ryujinx naming - full stage-prefixed key so we don't leave a
+                        //dangling "vp_"/"fp_" prefix behind (it's not just a substring match)
+                        if (line.Contains("vp_c1.data["))
+                        {
+                            foreach (var var in constant_lookup_vp)
+                            {
+                                if (line.Contains(var.Key))
+                                    line = line.Replace(var.Key, var.Value.ToString());
+                            }
+                        }
+                        if (line.Contains("fp_c1.data["))
+                        {
+                            foreach (var var in constant_lookup_fp)
                             {
                                 if (line.Contains(var.Key))
                                     line = line.Replace(var.Key, var.Value.ToString());

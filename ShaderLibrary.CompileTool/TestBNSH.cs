@@ -37,7 +37,7 @@ namespace ShaderLibrary.Test
                 foreach (var name in reflection.Outputs.Keys)
                     Console.WriteLine($"Outputs {name} {reflection.GetOutputLocation(name)}");
 
-                foreach (var name in reflection.ConstantBuffers.Keys)
+                foreach (var name in reflection.UniformBuffers.Keys)
                     Console.WriteLine($"Block {name} {reflection.GetConstantBufferLocation(name)}");
 
                 foreach (var name in reflection.Samplers.Keys)

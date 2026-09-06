@@ -354,15 +354,32 @@ namespace ShaderLibrary.CompileTool
         /// appear in more than one candidate archive for an actor with several
         /// <c>AnimationResources</c> entries - first one found wins).
         /// </summary>
-        /// <param name="patternTextures">Collects every texture a texture pattern anim can select, for the caller to export out of <c>TexToGo/</c> - by definition these are NOT the textures a material currently binds, so nothing else pulls them in.</param>
-        static void ExportAnimsFromResFile(string romfsRoot, ResFile animResFile, string modelName, string outDir,
-            HashSet<string> alreadyExported, HashSet<string> patternTextures)
+        /// <summary>
+        /// What an anim export run accumulates across every archive it walks: one already-exported
+        /// name set PER KIND (they share no namespace - a skeletal anim and a material anim may
+        /// legitimately have the same name, and each writes its own file), plus every texture a
+        /// texture pattern anim can select, which the caller has to pull out of <c>TexToGo/</c>
+        /// because no material binds them.
+        /// </summary>
+        public sealed class AnimExportState
         {
-            ExportTexturePatternAnim.ExportFrom(romfsRoot, animResFile, modelName, outDir, alreadyExported, patternTextures);
+            public HashSet<string> Skeletal { get; } = new(StringComparer.Ordinal);
+            public HashSet<string> TexturePattern { get; } = new(StringComparer.Ordinal);
+            public HashSet<string> Material { get; } = new(StringComparer.Ordinal);
+            public HashSet<string> PatternTextures { get; } = new(StringComparer.Ordinal);
+            /// <summary>The model's own materials - a material anim's parameters have to be classified and range-checked against these, not against whatever the anim archive happens to contain.</summary>
+            public Dictionary<string, Material> ModelMaterials { get; } = new(StringComparer.Ordinal);
+        }
+
+        static void ExportAnimsFromResFile(string romfsRoot, ResFile animResFile, string modelName, string outDir,
+            AnimExportState state)
+        {
+            ExportTexturePatternAnim.ExportFrom(romfsRoot, animResFile, modelName, outDir, state.TexturePattern, state.PatternTextures);
+            ExportMaterialAnim.ExportFrom(animResFile, modelName, outDir, state.Material, state.ModelMaterials);
 
             foreach (SkeletalAnim anim in animResFile.SkeletalAnims.Values)
             {
-                if (!alreadyExported.Add(anim.Name))
+                if (!state.Skeletal.Add(anim.Name))
                     continue;
                 string safeAnim = anim.Name.Replace(":", "_").Replace("/", "_");
                 ExportSkeletalAnim(anim, Path.Combine(outDir, $"{modelName}.{safeAnim}.anim.json"));
@@ -415,7 +432,7 @@ namespace ShaderLibrary.CompileTool
         /// <c>AnimPackNames</c>) - no guessing at all.
         /// </summary>
         public static void ExportAnimArchives(string romfsRoot, IEnumerable<string> animPackNames, string modelName, string outDir,
-            HashSet<string> alreadyExported, HashSet<string> patternTextures)
+            AnimExportState state)
         {
             TotkCommon.Totk.Config.GamePath = romfsRoot;
             foreach (string pack in animPackNames)
@@ -427,7 +444,7 @@ namespace ShaderLibrary.CompileTool
                     continue;
                 }
                 if (LoadAnimArchive(path) is { } animResFile)
-                    ExportAnimsFromResFile(romfsRoot, animResFile, modelName, outDir, alreadyExported, patternTextures);
+                    ExportAnimsFromResFile(romfsRoot, animResFile, modelName, outDir, state);
             }
         }
 
@@ -441,8 +458,7 @@ namespace ShaderLibrary.CompileTool
         /// resolved actor pack would have named exactly, which is why this is the fallback, not
         /// the primary path.
         /// </summary>
-        public static void ExportExternalAnims(string romfsRoot, string modelName, string outDir,
-            HashSet<string> alreadyExported, HashSet<string> patternTextures)
+        public static void ExportExternalAnims(string romfsRoot, string modelName, string outDir, AnimExportState state)
         {
             string pack = modelName.Split('.')[0];
             string modelDir = Path.Combine(romfsRoot, "Model");
@@ -453,7 +469,7 @@ namespace ShaderLibrary.CompileTool
             foreach (string path in Directory.EnumerateFiles(modelDir, $"{pack}*.anim.bfres.zs"))
             {
                 if (LoadAnimArchive(path) is { } animResFile)
-                    ExportAnimsFromResFile(romfsRoot, animResFile, modelName, outDir, alreadyExported, patternTextures);
+                    ExportAnimsFromResFile(romfsRoot, animResFile, modelName, outDir, state);
             }
         }
 
@@ -487,14 +503,18 @@ namespace ShaderLibrary.CompileTool
             }
             // A texture pattern anim selects textures the materials do NOT currently bind, so the
             // texture export at the bottom of this method has to be told about them explicitly.
-            var patternTextures = new HashSet<string>(StringComparer.Ordinal);
-            var exportedPatternNames = new HashSet<string>(StringComparer.Ordinal);
-            ExportTexturePatternAnim.ExportFrom(romfsRoot, resFile, modelName, outDir, exportedPatternNames, patternTextures);
+            var animState = new AnimExportState();
+            foreach (string already in exportedAnimNames)
+                animState.Skeletal.Add(already);
+            foreach (var m in model.Materials)
+                animState.ModelMaterials[m.Key] = m.Value;
+            ExportTexturePatternAnim.ExportFrom(romfsRoot, resFile, modelName, outDir, animState.TexturePattern, animState.PatternTextures);
+            ExportMaterialAnim.ExportFrom(resFile, modelName, outDir, animState.Material, animState.ModelMaterials);
 
             if (animPackNames is { Count: > 0 })
-                ExportAnimArchives(romfsRoot, animPackNames, modelName, outDir, exportedAnimNames, patternTextures);
+                ExportAnimArchives(romfsRoot, animPackNames, modelName, outDir, animState);
             else
-                ExportExternalAnims(romfsRoot, modelName, outDir, exportedAnimNames, patternTextures);
+                ExportExternalAnims(romfsRoot, modelName, outDir, animState);
 
             // Only a genuinely rigid shape (VertexSkinCount == 0 - no per-vertex bone index in
             // BFRES at all, just one Shape.BoneIndex for the whole shape) compiles to a shader
@@ -685,8 +705,8 @@ namespace ShaderLibrary.CompileTool
                 foreach (var tr in m.TextureRefs)
                     texNames.Add(tr.Name);
             }
-            int patternOnly = patternTextures.Count(t => !texNames.Contains(t));
-            texNames.UnionWith(patternTextures);
+            int patternOnly = animState.PatternTextures.Count(t => !texNames.Contains(t));
+            texNames.UnionWith(animState.PatternTextures);
             if (patternOnly > 0)
                 Console.WriteLine($"[ExportTestBench] {patternOnly} extra texture(s) needed only by texture pattern anims.");
 

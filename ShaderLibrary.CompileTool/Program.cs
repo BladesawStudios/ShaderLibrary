@@ -50,6 +50,29 @@ namespace ShaderLibrary.CompilerTool
                 return;
             }
 
+            // "--rebuild-matubo <ActorOrModelName>" re-runs ONLY step 2 of prepare (the
+            // gsys_material blocks and their parameter-layout sidecars) into Marrow's own cache -
+            // the step a shader parameter anim depends on, and the one --reexport-geometry skips.
+            if (args.Contains("--rebuild-matubo"))
+            {
+                string actorOrModel = positional.Length > 1 ? positional[1] : "Enemy_Dragon_Darkness";
+                var matActor = ActorInfo.Resolve(romfsRoot, actorOrModel);
+                string matModel = matActor?.ModelName ?? actorOrModel;
+                string? matMc = RomfsPaths.ModelFile(romfsRoot, matModel);
+                if (matMc == null)
+                {
+                    Console.WriteLine($"[rebuild-matubo] {RomfsPaths.Explain(romfsRoot, matModel)}");
+                    return;
+                }
+                string matOut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                                             "Marrow", "cache", matModel, "matubo");
+                Directory.CreateDirectory(matOut);
+                BuildMaterialUbo.Run(
+                    Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha"),
+                    matMc, matOut);
+                return;
+            }
+
             if (args.Contains("--inspect-matanim"))
             {
                 string target = positional.Length > 1 ? positional[1] : "Enemy_Dragon_Darkness";

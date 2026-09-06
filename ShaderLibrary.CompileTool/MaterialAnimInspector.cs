@@ -43,11 +43,17 @@ namespace ShaderLibrary.CompileTool
 
             var sources = new List<(string Label, ResFile Res)>();
 
+            var modelMaterials = new Dictionary<string, Material>(StringComparer.Ordinal);
             string? mc = RomfsPaths.ModelFile(romfsRoot, modelName);
             if (mc != null)
             {
                 byte[] fres = TestMaterialDump.DecompressBfresMc(mc);
-                sources.Add(($"model {Path.GetFileName(mc)}", new ResFile(new MemoryStream(fres), false)));
+                var modelRes = new ResFile(new MemoryStream(fres), false);
+                sources.Add(($"model {Path.GetFileName(mc)}", modelRes));
+                // The model's own materials are what an anim's AnimDataOffset has to be resolved
+                // against - the offsets are into THAT material's ShaderParamData blob.
+                foreach (var m in modelRes.Models[0].Materials)
+                    modelMaterials[m.Key] = m.Value;
             }
             else
             {
@@ -97,6 +103,8 @@ namespace ShaderLibrary.CompileTool
 
                     foreach (MaterialAnimData mat in anim.MaterialAnimDataList)
                     {
+                        if (mat.ParamCount > 0)
+                            DumpParams(anim, mat, modelMaterials);
                         if (mat.TexturePatternCount == 0)
                             continue;
                         Console.WriteLine($"      material '{mat.Name}': patterns={mat.TexturePatternCount} " +
@@ -135,6 +143,62 @@ namespace ShaderLibrary.CompileTool
             Console.WriteLine($"\n=== {totalAnims} material anim(s), {totalPatternEntries} texture-pattern entries ===");
             if (samplerUse.Count > 0)
                 Console.WriteLine($"samplers driven: {string.Join(", ", samplerUse.Select(kv => $"{kv.Key} x{kv.Value}"))}");
+        }
+
+        /// <summary>
+        /// The shader-parameter half of a material anim: every curve's <c>AnimDataOffset</c>
+        /// resolved back to the parameter it drives, by finding the model material's own
+        /// <c>ShaderParam</c> whose <c>[DataOffset, DataOffset + DataSize)</c> range contains it.
+        ///
+        /// That range lookup is the whole trick. <c>AnimDataOffset</c> is a byte offset into the
+        /// MATERIAL's packed <c>ShaderParamData</c> blob, which is not the layout the compiled
+        /// <c>gsys_material</c> uniform block uses - <c>BuildMaterialUbo.BuildBlock</c> re-packs
+        /// blob -> block by parameter NAME. So an anim offset only becomes a UBO offset via the
+        /// parameter it lands in, plus how far into that parameter it lands.
+        ///
+        /// It also tells the <c>_fts</c> anims apart from the rest by what they actually touch:
+        /// BfresLibrary files every one of these under <c>ShaderParamAnims</c> regardless of the
+        /// FMAA's own flags, so the only reliable signal that an anim is a texture SRT one is that
+        /// its parameters are of type <c>TexSrt</c>.
+        /// </summary>
+        static void DumpParams(MaterialAnim anim, MaterialAnimData mat, IReadOnlyDictionary<string, Material> modelMaterials)
+        {
+            modelMaterials.TryGetValue(mat.Name, out Material? modelMat);
+            Console.WriteLine($"      material '{mat.Name}': params={mat.ParamCount} curves={mat.Curves.Count} " +
+                $"constants={mat.Constants?.Count ?? 0}{(modelMat == null ? "  [NOT IN THIS MODEL]" : "")}");
+
+            foreach (ParamAnimInfo info in mat.ParamAnimInfos)
+            {
+                // ParamAnimInfo.Name is the shader parameter's own name, so the parameter is known
+                // outright - what has to be worked out is only which BYTE of it each curve drives,
+                // and in which of the two offset spaces AnimDataOffset is expressed.
+                string paramInfo = "<not in this model's material>";
+                if (modelMat != null && modelMat.ShaderParams.ContainsKey(info.Name))
+                {
+                    ShaderParam p = modelMat.ShaderParams[info.Name];
+                    paramInfo = $"{p.Type} blobOffset={p.DataOffset} size={p.DataSize}";
+                }
+
+                int begin = info.BeginCurve, count = info.FloatCurveCount + info.IntCurveCount;
+                var targets = new List<string>();
+                for (int c = begin; c < begin + count && c < mat.Curves.Count; c++)
+                {
+                    AnimCurve curve = mat.Curves[c];
+                    targets.Add($"curve[{c}] animOffset={curve.AnimDataOffset} {curve.CurveType}/{curve.KeyType} " +
+                        $"range=[{curve.StartFrame},{curve.EndFrame}] scale={(float)curve.Scale:G6} offset={(float)curve.Offset:G6}");
+                }
+                for (int k = 0; k < info.ConstantCount; k++)
+                {
+                    int ci = info.BeginConstant + k;
+                    if (mat.Constants != null && ci < mat.Constants.Count)
+                        targets.Add($"const[{ci}] animOffset={mat.Constants[ci].AnimDataOffset} " +
+                            $"f={(float)mat.Constants[ci].Value:G6} i={(int)mat.Constants[ci].Value}");
+                }
+                Console.WriteLine($"         param '{info.Name}' ({paramInfo}) floatCurves={info.FloatCurveCount} " +
+                    $"intCurves={info.IntCurveCount} constants={info.ConstantCount} beginCurve={info.BeginCurve} subBind={info.SubBindIndex}");
+                foreach (string t in targets)
+                    Console.WriteLine($"            {t}");
+            }
         }
 
         /// <summary>An integer curve's already-decoded keys. BfresLibrary hands every curve back as floats regardless of on-disk key type, so the int value is the first element of each key rounded, plus the curve's own <c>Offset</c> - which for an int curve is an INT bit pattern, not a float (<c>ResAnimCurve::EvaluateInt</c> reads <c>[0x24]</c> as <c>int</c>).</summary>

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Linq;
 using BfresLibrary;
 using EffectLibraryTest;
@@ -76,6 +77,7 @@ namespace ShaderLibrary.CompileTool
                 string safe = mat.Name.Replace(":", "_").Replace("/", "_");
                 string path = Path.Combine(outDir, $"{safe}.gsys_material.bin");
                 File.WriteAllBytes(path, buffer);
+                WriteParamLayout(block, mat, Path.Combine(outDir, $"{safe}.params.json"));
 
                 Console.WriteLine();
                 Console.WriteLine($"-- {mat.Name} --");
@@ -87,6 +89,41 @@ namespace ShaderLibrary.CompileTool
                                   (missing > 0 ? $" ({string.Join(", ", missingNames.Take(8))}{(missing > 8 ? ", ..." : "")})" : ""));
                 Console.WriteLine($"   -> {path}");
             }
+        }
+
+        /// <summary>
+        /// Writes the sidecar every SHADER PARAMETER ANIMATION needs: which byte of the
+        /// <c>gsys_material</c> block each named parameter lives at.
+        ///
+        /// A material anim addresses its target as (parameter NAME, byte offset WITHIN that
+        /// parameter) - <c>ParamAnimInfo.Name</c> plus <c>AnimCurve.AnimDataOffset</c>, verified
+        /// against real data: Enemy_Dragon_Darkness's <c>Face_Eye_Scroll_fts</c> drives
+        /// <c>p_tex_srt1</c> at <c>animOffset 20</c>, which is byte 20 of a 24-byte TexSrt
+        /// (mode:int, scaleX, scaleY, rotation, translateX, translateY) - the translate Y that
+        /// scrolls the eye - with a constant at animOffset 0 setting the mode. So the anim never
+        /// needs the material's own packed <c>ShaderParamData</c> layout at all; it needs THIS
+        /// table, which is the only thing that knows where <c>p_tex_srt1</c> sits in the compiled
+        /// block. Emitting the block's whole uniform table (not just the parameters this material
+        /// happens to set) means an anim can drive a uniform the material left at its default.
+        /// </summary>
+        static void WriteParamLayout(BfshaUniformBlock block, Material mat, string outPath)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("{");
+            sb.AppendLine($"  \"material\": \"{mat.Name.Replace("\\", "\\\\").Replace("\"", "\\\"")}\",");
+            sb.AppendLine($"  \"block_size\": {block.Size},");
+            sb.AppendLine("  \"uniforms\": [");
+            var names = block.Uniforms.Keys.ToList();
+            for (int i = 0; i < names.Count; i++)
+            {
+                var u = block.Uniforms[names[i]];
+                int off = u.DataOffset == 0 ? u.Index * 4 : u.DataOffset - 1;
+                sb.Append($"    {{ \"name\": \"{names[i]}\", \"offset\": {off} }}");
+                sb.AppendLine(i == names.Count - 1 ? "" : ",");
+            }
+            sb.AppendLine("  ]");
+            sb.AppendLine("}");
+            File.WriteAllText(outPath, sb.ToString());
         }
 
         /// <summary>

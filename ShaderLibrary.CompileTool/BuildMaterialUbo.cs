@@ -266,7 +266,25 @@ namespace ShaderLibrary.CompileTool
                     ? $", \"type\": \"{p.Type}\"" : "";
                 string usedField = typeField.Length > 0 && usedNames != null
                     ? $", \"used\": {(usedNames.Contains(names[i]) ? "true" : "false")}" : "";
-                sb.Append($"    {{ \"name\": \"{names[i]}\", \"offset\": {off}{typeField}{usedField} }}");
+                // A material-parameter animation can drive just ONE sub-field of a TexSrt (e.g. only
+                // translateY, for a scroll effect) - see MaterialAnimPose's remarks on why it needs
+                // this material's own AUTHORED raw (mode, scaleX, scaleY, rotation, translateX,
+                // translateY) to fill in whichever sub-fields the anim leaves untouched, before
+                // re-baking the whole thing every frame the same way BuildBlock's TexSrtBake does.
+                string rawSrtField = "";
+                if (p is { Type: ShaderParamType.TexSrt or ShaderParamType.TexSrtEx } &&
+                    mat.ShaderParamData is { } srcData && p.DataOffset >= 0 && p.DataOffset + 24 <= srcData.Length)
+                {
+                    int so = p.DataOffset;
+                    int mode = BitConverter.ToInt32(srcData, so + 0);
+                    float sx = BitConverter.ToSingle(srcData, so + 4);
+                    float sy = BitConverter.ToSingle(srcData, so + 8);
+                    float rot = BitConverter.ToSingle(srcData, so + 12);
+                    float tx = BitConverter.ToSingle(srcData, so + 16);
+                    float ty = BitConverter.ToSingle(srcData, so + 20);
+                    rawSrtField = $", \"raw_srt\": [{mode}, {sx}, {sy}, {rot}, {tx}, {ty}]";
+                }
+                sb.Append($"    {{ \"name\": \"{names[i]}\", \"offset\": {off}{typeField}{usedField}{rawSrtField} }}");
                 sb.AppendLine(i == names.Count - 1 ? "" : ",");
             }
             sb.AppendLine("  ]");

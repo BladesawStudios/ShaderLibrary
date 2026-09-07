@@ -264,5 +264,34 @@ namespace ShaderLibrary.CompileTool
 
             return output;
         }
+
+        /// <summary>
+        /// Same operation as <see cref="Deswizzle"/>, generalized to a genuine 3D (volume)
+        /// texture's mip 0 - depth is real texel depth, not divided by any block factor, since
+        /// none of the block-compressed formats this tool handles block along Z (only X/Y).
+        /// </summary>
+        public static byte[] Deswizzle3D(byte[] swizzledData, TxtgFormat format, int width, int height, int depth)
+        {
+            var (bpp, blockW, blockH) = TxtgTexture.GetFormatInfo(format);
+
+            uint widthInBlocks = DivRoundUp((uint)width, blockW);
+            uint heightInBlocks = DivRoundUp((uint)height, blockH);
+            ulong blockHeightMip0 = BlockHeightMip0(heightInBlocks);
+
+            var output = new byte[widthInBlocks * heightInBlocks * (uint)depth * bpp];
+
+            unsafe
+            {
+                fixed (byte* srcPtr = swizzledData)
+                fixed (byte* dstPtr = output)
+                {
+                    DeswizzleBlockLinear(widthInBlocks, heightInBlocks, (ulong)depth,
+                        srcPtr, (ulong)swizzledData.Length, dstPtr, (ulong)output.Length,
+                        blockHeightMip0, bpp);
+                }
+            }
+
+            return output;
+        }
     }
 }

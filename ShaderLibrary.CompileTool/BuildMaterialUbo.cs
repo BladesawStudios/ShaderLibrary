@@ -92,6 +92,82 @@ namespace ShaderLibrary.CompileTool
             BuildForModel(bfsha, resFile.Models[0], outDir);
         }
 
+        /// <summary>
+        /// Dumps the REAL authored values behind <c>gsys_scene_material</c>'s "Const"-prefixed
+        /// fields (the Blueprint/ghost-effect family among them) - traced via Ghidra to
+        /// <c>gsys::ModelScene::initialize_</c>, which loads a real, separate model
+        /// (<c>Model/SystemModel.SceneMaterial.bfres.mc</c>, found by searching romfs for the
+        /// resource name "SceneMaterial" the scene looks up) via <c>gsys::ModelNW::initialize</c>
+        /// and passes THAT loaded model into every render context's
+        /// <c>gsys::ModelRenderContext::setSceneMaterial</c>. So unlike Context/Env ("Dynamic"
+        /// scene state written by engine code every frame, by field name - see
+        /// <c>setDynamicShadowParams</c>), SceneMat's "Const" fields are just an ordinary
+        /// MATERIAL's authored <c>ShaderParams</c> on this one dedicated model - the exact same
+        /// name-join mechanism <see cref="BuildBlock"/> already does for <c>gsys_material</c>,
+        /// just pointed at the <c>gsys_scene_material</c> block instead. No further Ghidra
+        /// archaeology needed once this model is located.
+        /// </summary>
+        public static void DumpSceneMaterial(string romfsRoot)
+        {
+            // The SceneMaterial model's own material compiles under a DIFFERENT shading model
+            // ("system_scene_material") than object materials do ("material") - live in the
+            // system archive, not the one every G-buffer/forward program uses. The BYTE LAYOUT is
+            // what matters for applying these values elsewhere (confirmed identical offsets/names
+            // to the "material" shading model's own gsys_scene_material block), not which archive
+            // happens to declare it - this is one shared, engine-wide UBO either way.
+            string materialBfshaPath = Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha");
+            string systemBfshaPath = Path.Combine(romfsRoot, "Shader", "system.Product.110.product.Nin_NX_NVN.bfsha");
+            var materialBfsha = new BfshaFile(new MemoryStream(LoadPossiblyCompressed(materialBfshaPath)));
+            var systemBfsha = new BfshaFile(new MemoryStream(LoadPossiblyCompressed(systemBfshaPath)));
+
+            string modelPath = Path.Combine(romfsRoot, "Model", "SystemModel.SceneMaterial.bfres.mc");
+            byte[] fres = TestMaterialDump.DecompressBfresMc(modelPath);
+            using var ms = new MemoryStream(fres);
+            var resFile = new ResFile(ms, false);
+
+            foreach (var matEntry in resFile.Models[0].Materials)
+            {
+                Material mat = matEntry.Value;
+                string shading = mat.ShaderAssign.ShadingModelName;
+                Console.WriteLine($"-- material \"{mat.Name}\" (shading model \"{shading}\") --");
+                if (!materialBfsha.ShaderModels.TryGetValue(shading, out var sm) &&
+                    !systemBfsha.ShaderModels.TryGetValue(shading, out sm))
+                {
+                    Console.WriteLine($"   [skip] shading model \"{shading}\" not in material.bfsha or system.bfsha");
+                    continue;
+                }
+                // MasterMaterial's own shading model ("system_scene_material") doesn't CONSUME a
+                // gsys_scene_material block itself - it declares an ordinary gsys_material block
+                // (its own self-material data), which turns out to BE the SceneMat byte layout
+                // (confirmed: identical field names/offsets to the "material" shading model's own
+                // gsys_scene_material block) - this material's job is to SUPPLY that data to every
+                // OTHER shading model's gsys_scene_material, not read one itself.
+                if (!sm.UniformBlocks.TryGetValue("gsys_material", out var block))
+                {
+                    Console.WriteLine($"   [skip] this shading model has no gsys_material block either. Has: {string.Join(", ", sm.UniformBlocks.Keys)}");
+                    continue;
+                }
+
+                byte[] buffer = BuildBlock(block, mat, out int matched, out int missing, out var missingNames);
+                Console.WriteLine($"   matched {matched}, unmatched {missing}" +
+                                  (missing > 0 ? $" ({string.Join(", ", missingNames)})" : ""));
+
+                var ordered = block.Uniforms.Keys.OrderBy(n => GetUniformOffset(block.Uniforms[n])).ToList();
+                for (int i = 0; i < ordered.Count; i++)
+                {
+                    string name = ordered[i];
+                    int off = GetUniformOffset(block.Uniforms[name]);
+                    int next = i < ordered.Count - 1 ? GetUniformOffset(block.Uniforms[ordered[i + 1]]) : block.Size;
+                    int span = Math.Max(4, Math.Min(next - off, 16)); // cap at 16 - a mat3x4/mat4 isn't a plain float vector, print just its first row's worth
+                    bool authored = mat.ShaderParams.ContainsKey(name);
+                    var floats = new List<string>();
+                    for (int b = 0; b + 4 <= span && off + b + 4 <= buffer.Length; b += 4)
+                        floats.Add(BitConverter.ToSingle(buffer, off + b).ToString("G6"));
+                    Console.WriteLine($"   +{off,4}  {name,-50} = ({string.Join(", ", floats)}){(authored ? "  [AUTHORED by this material]" : "")}");
+                }
+            }
+        }
+
         /// <summary>Reads a romfs file that may exist either plain or as its usual zstd-compressed <c>.zs</c> sibling (or both - the plain form, if present, is authoritative and is tried first since it needs no dictionary lookup).</summary>
         static byte[] LoadPossiblyCompressed(string plainPath)
         {

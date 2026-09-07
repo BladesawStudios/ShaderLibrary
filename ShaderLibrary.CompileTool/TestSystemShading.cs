@@ -124,8 +124,27 @@ namespace ShaderLibrary.CompileTool
                     uint next = i < uniforms.Count - 1 ? uniforms[i + 1].Offset : block.Size;
                     uint size = next > offset ? next - offset : 4;
 
-                    Console.WriteLine($"       +0x{offset:X4} ({offset,5})  {fpName}.data[{offset / 16}].{Component(offset)}  size={size,3}  {uniforms[i].Name}");
-                    sb.AppendLine($"    {GlslTypeFor(size)} {uniforms[i].Name}; // +{offset} -> {fpName}.data[{offset / 16}].{Component(offset)}");
+                    // The block's own compiled DEFAULT bytes - for a "Const" field (author-set
+                    // once, not written per-frame by engine code the way "Dynamic" fields are),
+                    // this is very likely the ONLY real value that exists anywhere, since nothing
+                    // in the executable looks it up by name the way p_dynamic_* fields do. Printed
+                    // as a raw float per 4 bytes of this uniform's span so a vec3/vec4 shows all
+                    // its components, not just the first.
+                    string defaults = "";
+                    if (block.DefaultBuffer != null && offset + size <= block.DefaultBuffer.Length)
+                    {
+                        var parts = new List<string>();
+                        for (uint b = 0; b < size; b += 4)
+                            parts.Add(BitConverter.ToSingle(block.DefaultBuffer, (int)(offset + b)).ToString("G6"));
+                        defaults = $"  default=({string.Join(", ", parts)})";
+                    }
+                    else if (block.DefaultBuffer == null)
+                    {
+                        defaults = "  default=(NO DefaultBuffer on this block)";
+                    }
+
+                    Console.WriteLine($"       +0x{offset:X4} ({offset,5})  {fpName}.data[{offset / 16}].{Component(offset)}  size={size,3}  {uniforms[i].Name}{defaults}");
+                    sb.AppendLine($"    {GlslTypeFor(size)} {uniforms[i].Name}; // +{offset} -> {fpName}.data[{offset / 16}].{Component(offset)}{defaults}");
                 }
                 sb.AppendLine();
             }

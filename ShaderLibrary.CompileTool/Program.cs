@@ -100,6 +100,33 @@ namespace ShaderLibrary.CompilerTool
                 return;
             }
 
+            // "--extract-system-textures" pulls real static assets behind the "system" texture
+            // names compiled shaders reference (currently just cTex_Proc3DNoise - see
+            // SystemTextures.cs's remarks for why the rest are dynamic render targets with no
+            // romfs file to extract) into Marrow's shared cache.
+            if (args.Contains("--extract-system-textures"))
+            {
+                string sysOutDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                                                "Marrow", "cache", "_system_textures");
+                SystemTextures.ExtractProc3DNoise(romfsRoot, sysOutDir);
+                return;
+            }
+
+            // "--inspect-bntx <path>" prints every texture in a (plain, already-decompressed)
+            // .bntx file's full header - dimensions/depth/array length/mip count/format/dim -
+            // for figuring out whether a "system" texture the compiled shaders reference (e.g.
+            // cTex_Proc3DNoise, a sampler3D) is a real 3D volume texture asset or something else.
+            if (args.Contains("--inspect-bntx"))
+            {
+                string bntxPath = positional.Length > 0 ? positional[0] : "";
+                var bntxFile = new Syroot.NintenTools.NSW.Bntx.BntxFile(bntxPath);
+                foreach (var t in bntxFile.Textures)
+                {
+                    Console.WriteLine($"{t.Name}: {t.Width}x{t.Height}x{t.Depth} array={t.ArrayLength} mips={t.MipCount} format={t.Format} dim={t.Dim} tileMode={t.TileMode} imageSize={t.ImageSize}");
+                }
+                return;
+            }
+
             if (args.Contains("--test-txtg"))
             {
                 string[] names = positional.Length > 1
@@ -117,6 +144,38 @@ namespace ShaderLibrary.CompilerTool
                 int mip = positional.Length > 2 ? int.Parse(positional[2]) : 0;
                 string outPath = positional.Length > 3 ? positional[3] : $"{texName}_mip{mip}.bin";
                 TestTxtg.DumpSurface(romfsRoot, texName, mip, outPath);
+                return;
+            }
+
+            // "--dump-uniform-blocks [bfshaPath] [outDir]" runs TestSystemShading.DumpUniformBlocks
+            // against ANY bfsha (not just system.*.bfsha - despite the class name, it's generic
+            // BFSHA reflection, nothing system-archive-specific) - defaults to material.*.bfsha,
+            // the shared character shading archive every G-buffer/forward program compiles from.
+            // Prints every uniform block's real name/offset/size AND its compiled DefaultBuffer
+            // value per field - for a "Const"-prefixed field (author-set once, unlike "Dynamic"
+            // fields the engine writes by name every frame - see setDynamicShadowParams for that
+            // mechanism) this default is very likely the ONLY real value that exists anywhere,
+            // since nothing in the executable looks a Const field up by name.
+            // "--dump-scene-material" reads the REAL authored values behind gsys_scene_material's
+            // "Const" fields (the Blueprint/ghost family among them) straight from
+            // Model/SystemModel.SceneMaterial.bfres.mc's own material ShaderParams - see
+            // BuildMaterialUbo.DumpSceneMaterial's remarks for how this was traced via Ghidra.
+            if (args.Contains("--dump-scene-material"))
+            {
+                BuildMaterialUbo.DumpSceneMaterial(romfsRoot);
+                return;
+            }
+
+            if (args.Contains("--dump-uniform-blocks"))
+            {
+                // positional[0] is already romfsRoot (consumed above) - this flag's own args start at [1].
+                string bfshaArg = positional.Length > 1
+                    ? positional[1]
+                    : Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha");
+                string outDirArg = positional.Length > 2
+                    ? positional[2]
+                    : Path.Combine(Path.GetTempPath(), "marrow_uniform_blocks");
+                TestSystemShading.Run(bfshaArg, "", outDirArg);
                 return;
             }
 

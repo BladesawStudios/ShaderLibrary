@@ -282,6 +282,20 @@ namespace ShaderLibrary.CompileTool
         /// name the block declares. Parameters the block does not declare are skipped and
         /// reported rather than written somewhere arbitrary - a material can legitimately carry
         /// author-side parameters the compiled variant does not consume.
+        ///
+        /// TexSrt/TexSrtEx are the one type NOT copied byte-for-byte: the material's raw
+        /// ShaderParamData for these is the AUTHORED (mode, scaleX, scaleY, rotation, translateX,
+        /// translateY) form, but the compiled shader's block expects the BAKED form the real game
+        /// computes at load time - a 2x2 rotate-scale matrix plus translation, read directly as
+        /// `[u',v'] = [u,v] * [[M0.x,M0.y],[M0.z,M0.w]] + [M1.x,M1.y]` (confirmed against every real
+        /// decompiled vertex shader that reads a TexSrt-typed Mat slot, e.g.
+        /// material_prog11146_extracted.vert's UV0 transform). Raw-copying the authored form was
+        /// silently feeding (mode, scaleX, scaleY, rotation) into a matrix's (a,b,c,d) slots -
+        /// mode (0 or 1) and rotation (a small radian value) standing in for what should be
+        /// cos/sin*scale terms - which for mode 0 and near-1 scales collapses to an almost-exact
+        /// U/V swap (u' ~= v*scaleY + tx, v' ~= u*scaleX + rotation*v + ty). See BakeTexSrt's own
+        /// remarks for the real baking formula, reverse engineered via Ghidra
+        /// (nn::g3d2::MaterialObj's per-kind TexSrt callback table).
         /// </summary>
         static byte[] BuildBlock(BfshaUniformBlock block, Material mat,
                                  out int matched, out int missing, out List<string> missingNames)
@@ -322,11 +336,94 @@ namespace ShaderLibrary.CompileTool
                     continue;
                 }
 
-                Array.Copy(src, srcOff, buffer, dstOff, len);
+                if (p.Type is ShaderParamType.TexSrt or ShaderParamType.TexSrtEx)
+                {
+                    if (Environment.GetEnvironmentVariable("MC_DEBUG_TEXSRT") == "1")
+                    {
+                        int mode = BitConverter.ToInt32(src, srcOff + 0);
+                        float sx = BitConverter.ToSingle(src, srcOff + 4);
+                        float sy = BitConverter.ToSingle(src, srcOff + 8);
+                        float rot = BitConverter.ToSingle(src, srcOff + 12);
+                        float tx = BitConverter.ToSingle(src, srcOff + 16);
+                        float ty = BitConverter.ToSingle(src, srcOff + 20);
+                        Console.WriteLine($"[TexSrt] {mat.Name}.{name}: mode={mode} sx={sx} sy={sy} rot={rot} tx={tx} ty={ty}");
+                    }
+                    byte[] baked = TexSrtBake.Bake(src, srcOff);
+                    Array.Copy(baked, 0, buffer, dstOff, Math.Min(baked.Length, len));
+                }
+                else
+                {
+                    Array.Copy(src, srcOff, buffer, dstOff, len);
+                }
                 matched++;
             }
 
             return buffer;
+        }
+    }
+
+    /// <summary>
+    /// Bakes a material's authored TexSrt (mode, scaleX, scaleY, rotation, translateX,
+    /// translateY) into the 2x2 rotate-scale matrix + translation the compiled shader's
+    /// gsys_material block actually stores - reverse engineered via Ghidra from
+    /// nn::g3d2::MaterialObj::ConvertDirtyParams's per-kind callback table (kind &gt;= 0x1c gets a
+    /// callback instead of a raw copy). The dispatcher (0x7100072448) reads the mode field and
+    /// tail-jumps to a mode-specific baker; only modes 0 ("Maya"-style, pivot at UV centre,
+    /// 0x7100072860) and 1 ("3dsMax"-style, same rotate-scale block, different translate/pivot
+    /// term, 0x7100072950) were confirmed against real decompiled code. No real TotK material
+    /// observed so far uses a mode other than 0 or 1; anything else falls back to the raw values
+    /// (matching the old behaviour) rather than guessing a formula for an unconfirmed mode.
+    /// </summary>
+    public static class TexSrtBake
+    {
+        public static byte[] Bake(byte[] src, int srcOff)
+        {
+            int mode = BitConverter.ToInt32(src, srcOff + 0);
+            float sx = BitConverter.ToSingle(src, srcOff + 4);
+            float sy = BitConverter.ToSingle(src, srcOff + 8);
+            float rot = BitConverter.ToSingle(src, srcOff + 12);
+            float tx = BitConverter.ToSingle(src, srcOff + 16);
+            float ty = BitConverter.ToSingle(src, srcOff + 20);
+
+            float cos = MathF.Cos(rot);
+            float sin = MathF.Sin(rot);
+
+            float m0x = sx * cos, m0y = -sy * sin, m0z = sx * sin, m0w = sy * cos;
+            float m1x, m1y;
+
+            switch (mode)
+            {
+                case 0:
+                {
+                    // 0x7100072860 - Maya-style, pivot at UV centre (0.5, 0.5).
+                    float sinHalf = fma(sin, 0.5f, -0.5f);
+                    m1x = sx * ((cos * -0.5f - sinHalf) - tx);
+                    m1y = sy * (fma(cos, -0.5f, sinHalf) + ty) + 1.0f;
+                    break;
+                }
+                case 1:
+                {
+                    // 0x7100072950 - 3dsMax-style, pivot at UV centre, different translate handedness.
+                    m1x = sx * sin * (ty - 0.5f) - sx * cos * (tx + 0.5f) + 0.5f;
+                    m1y = sy * sin * (tx + 0.5f) + sy * cos * (ty - 0.5f) + 0.5f;
+                    break;
+                }
+                default:
+                    // Unconfirmed mode - preserve the old (wrong, but no worse) raw pass-through
+                    // rather than apply a formula that was never verified against real content.
+                    return src.Length >= srcOff + 24 ? src[srcOff..(srcOff + 24)] : new byte[24];
+            }
+
+            byte[] baked = new byte[32];
+            BitConverter.GetBytes(m0x).CopyTo(baked, 0);
+            BitConverter.GetBytes(m0y).CopyTo(baked, 4);
+            BitConverter.GetBytes(m0z).CopyTo(baked, 8);
+            BitConverter.GetBytes(m0w).CopyTo(baked, 12);
+            BitConverter.GetBytes(m1x).CopyTo(baked, 16);
+            BitConverter.GetBytes(m1y).CopyTo(baked, 20);
+            return baked;
+
+            static float fma(float a, float b, float c) => a * b + c;
         }
     }
 }

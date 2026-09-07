@@ -568,6 +568,11 @@ namespace ShaderLibrary.CompileTool
                 var colors0 = helper.Contains("_c0") ? helper["_c0"].Data : null;
                 var uvs1 = helper.Contains("_u1") ? helper["_u1"].Data : null;
 
+                if (Environment.GetEnvironmentVariable("MC_DEBUG_VERTEXATTRS") == "1")
+                {
+                    Console.WriteLine($"[VertexAttrs] {shape.Name}: u0={helper.Contains("_u0")} u1={helper.Contains("_u1")} u2={helper.Contains("_u2")} u3={helper.Contains("_u3")} c0={helper.Contains("_c0")} c1={helper.Contains("_c1")}");
+                }
+
                 uint[] indices = mesh.GetIndices().ToArray();
 
                 string safeName = shape.Name.Replace(":", "_").Replace("/", "_");

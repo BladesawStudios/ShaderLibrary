@@ -62,6 +62,18 @@ namespace ShaderLibrary.CompileTool
         public TxtgFormat Format;
         public byte[] Hash = Array.Empty<byte>();
         public List<TxtgSurface> Surfaces = new();
+        /// <summary>
+        /// The container's own real, authored per-texture channel-selector bytes (which SOURCE
+        /// channel - 0=R,1=G,2=B,3=A, plus 4/5 meaning constant-0/constant-1 on some other
+        /// Nintendo texture containers - feeds each OUTPUT channel, in R,G,B,A order). Previously
+        /// parsed and silently discarded (the four header bytes were read into nothing) - every
+        /// texture Marrow has ever loaded fell back to a generic, hardcoded default swizzle
+        /// regardless of what this field actually specified. For the one texture checked so far
+        /// (Cmn_Enemy_DungeonBoss_Eye_Alb) this happens to BE the identity mapping (0,1,2,3), so it
+        /// wasn't the cause of that investigation's bug - but the field is real, and silently
+        /// dropping it is a real latent bug for any OTHER texture with a genuinely custom swizzle.
+        /// </summary>
+        public byte[] CompSelect = [0, 1, 2, 3];
 
         static readonly Dictionary<ushort, TxtgFormat> FormatList = new()
         {
@@ -135,10 +147,7 @@ namespace ShaderLibrary.CompileTool
             reader.ReadByte(); // FormatFlag
             reader.ReadUInt32(); // FormatSetting
 
-            reader.ReadByte(); // CompSelectR
-            reader.ReadByte(); // CompSelectG
-            reader.ReadByte(); // CompSelectB
-            reader.ReadByte(); // CompSelectA
+            tex.CompSelect = reader.ReadBytes(4); // CompSelect R,G,B,A - see the field's own remarks
 
             tex.Hash = reader.ReadBytes(32);
 

@@ -18,7 +18,7 @@ namespace EffectLibraryTest
 
         static string TranslateShader(byte[] data)
         {
-            TranslationFlags flags = TranslationFlags.None;
+            TranslationFlags flags = TranslationFlags.DebugMode;
 
             TranslationOptions translationOptions = new TranslationOptions(TargetLanguage.Glsl, TargetApi.OpenGL, flags);
             ShaderProgram program = Translator.CreateContext(0, new GpuAccessor(data), translationOptions).Translate();

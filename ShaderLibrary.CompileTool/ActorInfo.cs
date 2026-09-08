@@ -53,9 +53,21 @@ namespace ShaderLibrary.CompileTool
                 return null;
             }
 
+            // A Component/ModelInfo entry existing is NOT by itself proof it names a real model -
+            // confirmed on several "Player*" effect/logic actors (e.g. ExpandElectricField_Player):
+            // they carry a ModelInfo entry with neither ModelProjectName nor FmdbName at all (some
+            // other, narrower schema this class doesn't need), so indexing those keys unconditionally
+            // threw a raw KeyNotFoundException straight out of this method instead of the same clean
+            // "nothing to resolve" null the missing-modelInfoKey case just above already returns.
             var modelInfo = Byml.FromBinary(sarc[modelInfoKey].ToArray()).GetMap();
-            string modelProjectName = modelInfo["ModelProjectName"].GetString();
-            string fmdbName = modelInfo["FmdbName"].GetString();
+            if (!modelInfo.TryGetValue("ModelProjectName", out var modelProjectNameNode) ||
+                !modelInfo.TryGetValue("FmdbName", out var fmdbNameNode))
+            {
+                Console.WriteLine($"[ActorInfo] '{actorName}' has a Component/ModelInfo but no ModelProjectName/FmdbName in it - not a real model.");
+                return null;
+            }
+            string modelProjectName = modelProjectNameNode.GetString();
+            string fmdbName = fmdbNameNode.GetString();
             string modelName = $"{modelProjectName}.{fmdbName}";
 
             var animPackNames = new List<string>();

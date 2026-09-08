@@ -33,6 +33,17 @@ namespace ShaderLibrary.CompileTool
     /// </summary>
     public static class TestSystemShading
     {
+        /// <param name="systemBfshaPath">
+        /// Either a plain, already-decompressed ".bfsha" file, or (the normal romfs case) one that
+        /// only exists as "&lt;path&gt;.zs" - resolved the same way <c>BuildMaterialUbo</c>'s own
+        /// system-deferred loading does, so this works directly against real romfs, not just a
+        /// pre-decompressed copy someone made by hand.
+        /// </param>
+        /// <param name="deferredBfresPath">
+        /// Either a plain ".bfres", or (the normal romfs case) an MCPK-wrapped ".bfres.mc" -
+        /// resolved via <see cref="TestMaterialDump.DecompressBfresMc"/> the same way every other
+        /// romfs model in this tool is.
+        /// </param>
         public static void Run(string systemBfshaPath, string deferredBfresPath, string outDir)
         {
             Directory.CreateDirectory(outDir);
@@ -41,7 +52,7 @@ namespace ShaderLibrary.CompileTool
             Console.WriteLine($"# System shader archive: {systemBfshaPath}");
             Console.WriteLine("################################################################");
 
-            var bfsha = new BfshaFile(systemBfshaPath);
+            var bfsha = new BfshaFile(new MemoryStream(LoadPossiblyCompressed(systemBfshaPath)));
             Console.WriteLine($"ShaderModels ({bfsha.ShaderModels.Count}): {string.Join(", ", bfsha.ShaderModels.Keys)}");
 
             foreach (var smEntry in bfsha.ShaderModels)
@@ -58,13 +69,32 @@ namespace ShaderLibrary.CompileTool
 
             if (!string.IsNullOrEmpty(deferredBfresPath) && File.Exists(deferredBfresPath))
             {
-                var resolved = DumpDeferredModel(bfsha, deferredBfresPath);
+                // Same convention as BuildMaterialUbo.RunSystemDeferred: the CALLER resolves which
+                // of ".bfres.mc" (real romfs, MCPK-wrapped) or plain ".bfres" (already
+                // decompressed) actually exists and passes that exact path; this just decompresses
+                // based on which one it got.
+                byte[] fres = deferredBfresPath.EndsWith(".mc", StringComparison.OrdinalIgnoreCase)
+                    ? TestMaterialDump.DecompressBfresMc(deferredBfresPath)
+                    : File.ReadAllBytes(deferredBfresPath);
+                var deferredResFile = new ResFile(new MemoryStream(fres), false);
+
+                var resolved = DumpDeferredModel(bfsha, deferredResFile);
 
                 // Extract each deferred pass under its OWN pass name rather than a bare program
                 // number, so a file's name says which screen pass it implements.
                 foreach (var kv in resolved.OrderBy(k => k.Key))
-                    ExtractPrograms(systemBfshaPath, "system_shading", new[] { kv.Value }, outDir, $"deferred_{kv.Key}");
+                    ExtractPrograms(bfsha, "system_shading", new[] { kv.Value }, outDir, $"deferred_{kv.Key}");
             }
+        }
+
+        /// <summary>Same convention as BuildMaterialUbo's own private helper of the same name: if the plain path exists, it's already decompressed - use it as-is; otherwise it's real romfs, only shipped as "&lt;path&gt;.zs".</summary>
+        static byte[] LoadPossiblyCompressed(string plainPath)
+        {
+            if (File.Exists(plainPath))
+                return File.ReadAllBytes(plainPath);
+            string zsPath = plainPath + ".zs";
+            byte[] raw = File.ReadAllBytes(zsPath);
+            return TotkCommon.Zstd.IsCompressed(raw) ? TotkCommon.Totk.Zstd.Decompress(raw) : raw;
         }
 
         /// <summary>
@@ -207,15 +237,20 @@ namespace ShaderLibrary.CompileTool
         /// material through the normal option-search path yields the REAL program index for that
         /// pass, which is what the test bench must run - rather than assuming "prog 0" / "prog 72".
         /// </summary>
-        public static Dictionary<string, int> DumpDeferredModel(BfshaFile bfsha, string deferredBfresPath)
+        /// <summary>
+        /// Takes an already-loaded <see cref="ResFile"/> rather than a path - constructing one
+        /// straight from a raw romfs path silently produces garbage/throws, since real romfs ships
+        /// this model MCPK-wrapped (a bare ".bfres" with no ".mc" only exists if something already
+        /// decompressed it first) - see <see cref="Run"/> for where that actually happens.
+        /// </summary>
+        public static Dictionary<string, int> DumpDeferredModel(BfshaFile bfsha, ResFile resFile)
         {
             var resolved = new Dictionary<string, int>();
             Console.WriteLine();
             Console.WriteLine("################################################################");
-            Console.WriteLine($"# Deferred pass model: {deferredBfresPath}");
+            Console.WriteLine($"# Deferred pass model: {resFile.Models[0].Name}");
             Console.WriteLine("################################################################");
 
-            var resFile = new ResFile(deferredBfresPath);
             var model = resFile.Models[0];
             Console.WriteLine($"Model \"{model.Name}\": {model.Shapes.Count} shape(s), {model.Materials.Count} material(s)");
 
@@ -259,11 +294,15 @@ namespace ShaderLibrary.CompileTool
         /// merely reads and one that can actually be compiled and run: the raw decompile leaves
         /// fp_c1.data[N] dangling (there is no such bound block), while the extracted form
         /// substitutes the real baked float literals from the shader's control section.
+        ///
+        /// Takes an already-loaded <see cref="BfshaFile"/> rather than a path - constructing one
+        /// straight from a raw romfs path silently produces garbage/throws, since real romfs ships
+        /// this archive zstd-compressed (a bare ".bfsha" with no ".zs" only exists if something
+        /// already decompressed it first) - see <see cref="Run"/> for where that actually happens.
         /// </summary>
-        public static void ExtractPrograms(string systemBfshaPath, string shadingModelName, int[] programIndices, string outDir, string labelPrefix)
+        public static void ExtractPrograms(BfshaFile bfsha, string shadingModelName, int[] programIndices, string outDir, string labelPrefix)
         {
             Directory.CreateDirectory(outDir);
-            var bfsha = new BfshaFile(systemBfshaPath);
 
             if (!bfsha.ShaderModels.ContainsKey(shadingModelName))
             {

@@ -24,14 +24,59 @@ namespace ShaderLibrary.CompileTool
     /// </summary>
     public static class TestAglShader
     {
-        public static void Run(string sharcbPath, string outDir, params string[] programFilter)
+        public static void Run(string sharcbPath, string outDir, params string[] programFilter) =>
+            Run(new SharcfbFile(sharcbPath), sharcbPath, outDir, programFilter);
+
+        /// <summary>
+        /// Extracts <c>hdr_compose</c> (the final HDR->displayable tonemap every model needs
+        /// regardless of which one is loaded) straight from real romfs: unpacks
+        /// <c>Shader/ApplicationPackage.Nin_NX_NVN.release.sarc.zs</c> (zstd, same convention as
+        /// every other <c>.pack.zs</c>/<c>.sarc.zs</c> in this game - see <c>ActorInfo.Resolve</c>
+        /// for the identical unpack pattern) and reads its <c>AglShader.sharcb</c> entry directly
+        /// from memory - no temp file, no pre-decompressed copy required. This is what makes
+        /// <c>agl_hdr_compose.vert/frag</c> reproducible on a fresh checkout instead of needing to
+        /// ship decompiled game shader output in the repo.
+        ///
+        /// <c>hdr_compose</c> has a real static macro, <c>ENABLE_COLOR_CORRECTION_TABLE[0|1]</c>,
+        /// so there is no bare "default" variation - the real archive only ever yields
+        /// <c>_ENABLE_COLOR_CORRECTION_TABLE0</c>/<c>1</c> variants, never the unsuffixed
+        /// <c>agl_hdr_compose</c> name <c>DeferredPipeline</c> actually loads. Confirmed via each
+        /// variant's own real sampler list (logged during extraction): TABLE1 additionally samples
+        /// <c>cColorCorrection</c>, a LUT texture nothing in this pipeline binds anywhere - TABLE0
+        /// only needs <c>cBloom</c>/<c>cColor</c>, both of which <c>BloomPass</c>/<c>TonemapPass</c>
+        /// already provide. TABLE0 is therefore the only one Marrow can actually run correctly, so
+        /// it's copied to the bare name after extraction rather than left as a choice.
+        /// </summary>
+        public static void ExtractHdrCompose(string romfsRoot, string outDir)
+        {
+            string sarcPath = Path.Combine(romfsRoot, "Shader", "ApplicationPackage.Nin_NX_NVN.release.sarc.zs");
+            byte[] raw = File.ReadAllBytes(sarcPath);
+            byte[] decompressed = TotkCommon.Zstd.IsCompressed(raw) ? TotkCommon.Totk.Zstd.Decompress(raw) : raw;
+            var sarc = SarcLibrary.Sarc.FromBinary(new ArraySegment<byte>(decompressed));
+            var entryNames = sarc.Select(kv => kv.Key).ToList();
+            string? sharcbKey = entryNames.FirstOrDefault(k => k == "AglShader.sharcb");
+            if (sharcbKey is null)
+                throw new FileNotFoundException($"'{sarcPath}' has no \"AglShader.sharcb\" entry (has: {string.Join(", ", entryNames)}) - archive layout changed?");
+
+            var sharc = new SharcfbFile(new MemoryStream(sarc[sharcbKey].ToArray()));
+            Run(sharc, "AglShader.sharcb (from ApplicationPackage.Nin_NX_NVN.release.sarc.zs)", outDir, "hdr_compose");
+
+            foreach (string ext in new[] { "vert", "frag" })
+            {
+                string variant = Path.Combine(outDir, $"agl_hdr_compose_ENABLE_COLOR_CORRECTION_TABLE0.{ext}");
+                string canonical = Path.Combine(outDir, $"agl_hdr_compose.{ext}");
+                if (File.Exists(variant))
+                    File.Copy(variant, canonical, overwrite: true);
+            }
+        }
+
+        static void Run(SharcfbFile sharc, string sourceLabel, string outDir, params string[] programFilter)
         {
             Directory.CreateDirectory(outDir);
             Console.WriteLine("################################################################");
-            Console.WriteLine($"# agl shader archive: {sharcbPath}");
+            Console.WriteLine($"# agl shader archive: {sourceLabel}");
             Console.WriteLine("################################################################");
 
-            var sharc = new SharcfbFile(sharcbPath);
             Console.WriteLine($"Name=\"{sharc.Name}\"  Programs={sharc.Programs.Count}  Variations={sharc.Variations.Count}");
 
             var wanted = new HashSet<string>(programFilter ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);

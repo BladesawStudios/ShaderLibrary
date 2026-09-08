@@ -23,9 +23,29 @@ namespace ShaderLibrary.CompilerTool
             bool verifyLookup = args.Contains("--verify-lookup");
             var positional = args.Where(a => !a.StartsWith("--")).ToArray();
 
+            // No sensible cross-machine default for a personal romfs dump - require it as the
+            // first positional arg or the TOTK_ROMFS_ROOT environment variable.
             string romfsRoot = positional.Length > 0
                 ? positional[0]
-                : @"C:\Users\dylan\shenanigans\Personal\Nintendo\Switch\Zelda TotK\RE\Romfs121";
+                : Environment.GetEnvironmentVariable("TOTK_ROMFS_ROOT")
+                  ?? throw new InvalidOperationException(
+                      "No romfs root given - pass it as the first argument or set TOTK_ROMFS_ROOT.");
+
+            // Legacy pre-Marrow.UI debug/test flags (--prepare, --manifest, --export-model, etc.)
+            // write into/read from this directory - not part of the repo (it's scratch output,
+            // not a dependency), so likewise no cross-machine default: set TESTBENCH_DIR if you
+            // still use those flags. The current, real workflow (Marrow.UI's Model Browser panel,
+            // or `Marrow.UI --prepare`) doesn't touch this at all.
+            string testBenchDir = Environment.GetEnvironmentVariable("TESTBENCH_DIR") ?? "";
+            string TestBenchPath(params string[] parts)
+            {
+                if (string.IsNullOrEmpty(testBenchDir))
+                    throw new InvalidOperationException("This flag needs TESTBENCH_DIR set - see its own remarks.");
+                var full = new string[parts.Length + 1];
+                full[0] = testBenchDir;
+                parts.CopyTo(full, 1);
+                return Path.Combine(full);
+            }
 
             ExternalBinaryStringTable.RomfsRoot = romfsRoot;
             BfresLibraryPatches.EnsureApplied();
@@ -268,7 +288,7 @@ namespace ShaderLibrary.CompilerTool
                     Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha"),
                     RomfsPaths.ModelFile(romfsRoot, model)
                         ?? throw new FileNotFoundException(RomfsPaths.Explain(romfsRoot, model)),
-                    Path.Combine(@"C:\Users\dylan\repos\Nintending\SHADERS5\TestBench\data", "matubo"));
+                    TestBenchPath("data", "matubo"));
                 return;
             }
 
@@ -280,8 +300,8 @@ namespace ShaderLibrary.CompilerTool
             if (args.Contains("--prepare"))
             {
                 string model = positional.Length > 1 ? positional[1] : "Weapon_Sword_070";
-                const string benchData = @"C:\Users\dylan\repos\Nintending\SHADERS5\TestBench\data";
-                const string benchShaders = @"C:\Users\dylan\repos\Nintending\SHADERS5\TestBench\Shaders\Decompiled";
+                string benchData = TestBenchPath("data");
+                string benchShaders = TestBenchPath("Shaders", "Decompiled");
                 string materialBfsha = Path.Combine(romfsRoot, "Shader",
                     "material.Product.110.product.Nin_NX_NVN.bfsha");
                 string? modelMc = RomfsPaths.ModelFile(romfsRoot, model);
@@ -312,7 +332,7 @@ namespace ShaderLibrary.CompilerTool
             // chara_nonmetal/hair/skin/grossy resolve to pure black without their real constants.
             if (args.Contains("--deferred-material-ubo"))
             {
-                const string benchData = @"C:\Users\dylan\repos\Nintending\SHADERS5\TestBench\data";
+                string benchData = TestBenchPath("data");
                 BuildMaterialUbo.Run(
                     Path.Combine(benchData, "system.Product.110.product.Nin_NX_NVN.bfsha"),
                     Path.Combine(benchData, "SystemModel.DeferredMain.bfres"),
@@ -373,8 +393,7 @@ namespace ShaderLibrary.CompilerTool
             if (args.Contains("--export-model"))
             {
                 string model = positional.Length > 1 ? positional[1] : "Weapon_Sword_070";
-                ExportTestBench.ExportModel(romfsRoot, model,
-                    @"C:\Users\dylan\repos\Nintending\SHADERS5\TestBench\data");
+                ExportTestBench.ExportModel(romfsRoot, model, TestBenchPath("data"));
                 return;
             }
 
@@ -386,22 +405,24 @@ namespace ShaderLibrary.CompilerTool
                 ExportManifest.Run(romfsRoot,
                     Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha"),
                     model,
-                    @"C:\Users\dylan\repos\Nintending\SHADERS5\TestBench\data",
-                    @"C:\Users\dylan\repos\Nintending\SHADERS5\TestBench\Shaders\Decompiled");
+                    TestBenchPath("data"),
+                    TestBenchPath("Shaders", "Decompiled"));
                 return;
             }
 
             if (aglShader)
             {
                 // agl post-process archive, unpacked from Shader/ApplicationPackage...sarc.zs
-                // Positional args after "--agl-shader": [archiveFile] [program names to dump...]
+                // Positional args after "--agl-shader": [archiveDir] [archiveFile] [program names to dump...]
                 // With no program names given, this only LISTS what the archive contains -
                 // useful for finding a pass by name (e.g. an outline/edge-detect effect) before
-                // asking to decompile it.
-                string archive = positional.Length > 1 ? positional[1] : "AglShader.sharcb";
-                string[] progNames = positional.Length > 2 ? positional[2..] : Array.Empty<string>();
-                TestAglShader.Run(Path.Combine(@"C:\Users\dylan\AppData\Local\Temp\claude\C--Users-dylan-repos-Nintending-SHADERS5\cb7a35ce-d20f-4d6a-a8be-626b7e346a83\scratchpad\apppkg", archive),
-                    @"C:\Users\dylan\repos\Nintending\SHADERS5\TestBench\Shaders\Decompiled", progNames);
+                // asking to decompile it. archiveDir defaults to the current directory - point it
+                // at wherever you unpacked ApplicationPackage...sarc.zs to.
+                string archiveDir = positional.Length > 1 ? positional[1] : ".";
+                string archive = positional.Length > 2 ? positional[2] : "AglShader.sharcb";
+                string[] progNames = positional.Length > 3 ? positional[3..] : Array.Empty<string>();
+                TestAglShader.Run(Path.Combine(archiveDir, archive),
+                    TestBenchPath("Shaders", "Decompiled"), progNames);
                 return;
             }
 
@@ -415,8 +436,8 @@ namespace ShaderLibrary.CompilerTool
 
             if (systemShadingOnly)
             {
-                const string benchData = @"C:\Users\dylan\repos\Nintending\SHADERS5\TestBench\data";
-                const string benchShaders = @"C:\Users\dylan\repos\Nintending\SHADERS5\TestBench\Shaders\Decompiled";
+                string benchData = TestBenchPath("data");
+                string benchShaders = TestBenchPath("Shaders", "Decompiled");
 
                 // Optional second positional arg: analyse a different archive instead (e.g. the
                 // material archive, to see whether IT names gsys_context/gsys_environment).
@@ -436,7 +457,7 @@ namespace ShaderLibrary.CompilerTool
             }
 
             string bfshaPath = Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha");
-            string outDir = @"C:\Users\dylan\repos\Nintending\SHADERS5\TestBench\Shaders\Decompiled";
+            string outDir = TestBenchPath("Shaders", "Decompiled");
             if (File.Exists(bfshaPath))
                 DecompilerRunner.Run(romfsRoot, bfshaPath, outDir);
 
@@ -444,7 +465,7 @@ namespace ShaderLibrary.CompilerTool
 
             Console.WriteLine();
             Console.WriteLine("[Exporting Master Sword 3D mesh and textures to TestBench/data]");
-            ExportTestBench.ExportSword(romfsRoot, @"C:\Users\dylan\repos\Nintending\SHADERS5\TestBench\data");
+            ExportTestBench.ExportSword(romfsRoot, TestBenchPath("data"));
         }
     }
 }

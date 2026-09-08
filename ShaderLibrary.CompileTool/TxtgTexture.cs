@@ -7,10 +7,9 @@ namespace ShaderLibrary.CompileTool
 {
     /// <summary>
     /// TotK ships textures as "*.txtg" ("Texture To Go", magic "6PK0") rather than plain .bntx.
-    /// This is a from-scratch port of the parsing logic in
-    /// C:\Users\dylan\repos\Switch-Toolbox\File_Format_Library\FileFormats\Texture\TXTG.cs (the
-    /// user pointed at this file directly as the reference) - trimmed down to just parsing +
-    /// deswizzling (no WinForms/editor/save support, none of which this tool needs).
+    /// This is a from-scratch port of the parsing logic in Switch-Toolbox's own
+    /// File_Format_Library/FileFormats/Texture/TXTG.cs reference implementation - trimmed down to
+    /// just parsing + deswizzling (no WinForms/editor/save support, none of which this tool needs).
     ///
     /// Container layout (fixed 0x50-byte header, all little-endian):
     ///   u16 HeaderSize (=0x50), u16 Version, char[4] Magic="6PK0", u16 Width, u16 Height,

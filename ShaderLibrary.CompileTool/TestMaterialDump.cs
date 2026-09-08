@@ -23,14 +23,14 @@ namespace ShaderLibrary.CompileTool
     /// that version's ShaderParam names all came back empty despite the raw ShaderParamData
     /// bytes being present (see git history for that attempt if curious).
     ///
-    /// The genuine, complete container spec lives in a proper reference implementation the user
-    /// pointed at: C:\Users\dylan\repos\MeshCodec (its own README/source, particularly
-    /// src/mc_MeshCodec.h's ResMeshCodecPackageHeader and src/mc_MeshCodec.cpp's DecompressMC,
-    /// is the authoritative spec - not this comment). Rather than re-port that C++ (bitpacked
-    /// vertex/index decode included) into C#, this shells out to that repo's own working CLI
-    /// tool (tests/src/main.cpp, built via its build.bat/CMakeLists.txt) to do the real,
-    /// complete decompression, then loads the resulting byte-perfect .bfres normally. See
-    /// MeshCodecCliPath below for how that tool is located.
+    /// The genuine, complete container spec lives in a proper reference implementation (its own
+    /// source, particularly src/mc_MeshCodec.h's ResMeshCodecPackageHeader and
+    /// src/mc_MeshCodec.cpp's DecompressMC, is the authoritative spec - not this comment). Rather
+    /// than re-port that C++ (bitpacked vertex/index decode included) into C#, this shells out to
+    /// that project's own working CLI tool's prebuilt binary, vendored into this repo at
+    /// vendor/MeshCodec/meshcodec_cli.exe, to do the real, complete decompression, then loads the
+    /// resulting byte-perfect .bfres normally. See MeshCodecCliPath below for how that tool is
+    /// located.
     ///
     /// See BfresLibraryPatches.cs for two BfresLibrary.dll bugs patched at runtime to reach
     /// Model/Material objects without crashing (unrelated to the container format - those bugs
@@ -40,20 +40,35 @@ namespace ShaderLibrary.CompileTool
     {
         /// <summary>
         /// Path to MeshCodec's built CLI decompressor (see class remarks - this repo is the
-        /// authoritative decoder, not reimplemented here). Built via:
-        ///   cd C:\Users\dylan\repos\MeshCodec
+        /// authoritative decoder, not reimplemented here). Vendored as a prebuilt binary at
+        /// vendor/MeshCodec/meshcodec_cli.exe, resolved relative to THIS source file's own
+        /// location (via <c>[CallerFilePath]</c>) rather than a hardcoded absolute path, so it
+        /// works from a fresh checkout on any machine regardless of where the repo lives.
+        ///
+        /// To rebuild it from MeshCodec's own source (github.com/M-Mods/MeshCodec or wherever it
+        /// was sourced from):
         ///   (initialize the lib/zstd submodule first: git submodule update --init --recursive)
         ///   cmake -B build -G Ninja -DCMAKE_MAKE_PROGRAM=&lt;path to VS's bundled ninja.exe&gt; ...
         ///   cmake --build build --config Release
         /// (devkitPro's own MSYS2-flavored cmake/ninja pair generates GCC-style flags that
         /// MSVC's cl.exe rejects - use Visual Studio's own bundled cmake+ninja, found under
         /// its install path at Common7\IDE\CommonExtensions\Microsoft\CMake\{CMake,Ninja}\,
-        /// invoked from an x64 Developer environment (vcvars64.bat) so cl.exe resolves.)
-        /// Override via the MESHCODEC_CLI environment variable if built somewhere else.
+        /// invoked from an x64 Developer environment (vcvars64.bat) so cl.exe resolves), then copy
+        /// the resulting tests/meshcodec_cli.exe over vendor/MeshCodec/meshcodec_cli.exe.
+        /// Override via the MESHCODEC_CLI environment variable to point at a different build.
         /// </summary>
         static string MeshCodecCliPath =>
             Environment.GetEnvironmentVariable("MESHCODEC_CLI")
-            ?? @"C:\Users\dylan\repos\MeshCodec\build\tests\meshcodec_cli.exe";
+            ?? Path.Combine(RepoVendorDir(), "MeshCodec", "meshcodec_cli.exe");
+
+        /// <summary>
+        /// This file lives at vendor/ShaderLibrary/ShaderLibrary.CompileTool/TestMaterialDump.cs,
+        /// so its own directory's great-grandparent is the repo's vendor/ folder - resolved from
+        /// the SOURCE file's compile-time location (stable across machines/checkouts), not the
+        /// build output directory (which varies by configuration/TFM).
+        /// </summary>
+        static string RepoVendorDir([System.Runtime.CompilerServices.CallerFilePath] string sourceFile = "") =>
+            Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourceFile)!, "..", ".."));
 
         /// <summary>
         /// Decompresses a romfs "*.bfres.mc" (MCPK-wrapped) file into a raw BFRES byte array

@@ -21,8 +21,8 @@ namespace ShaderLibrary.CompilerTool
                 {
                     int spdLen = m.ShaderParamData?.Length ?? 0;
                     Console.WriteLine($"Material: {m.Name} (ShaderParamData: {spdLen} bytes)");
-                    if (spdLen > 0) {
-                        File.WriteAllBytes(Path.Combine(@"C:\Users\dylan\repos\Nintending\SHADERS5\TestBench\data", $"{m.Name}_paramdata.bin"), m.ShaderParamData);
+                    if (spdLen > 0 && Environment.GetEnvironmentVariable("TESTBENCH_DIR") is { } testBenchDir) {
+                        File.WriteAllBytes(Path.Combine(testBenchDir, "data", $"{m.Name}_paramdata.bin"), m.ShaderParamData);
                     }
                     for (int i = 0; i < m.TextureRefs.Count; i++)
                     {

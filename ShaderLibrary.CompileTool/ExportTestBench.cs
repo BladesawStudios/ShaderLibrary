@@ -729,6 +729,8 @@ namespace ShaderLibrary.CompileTool
                 try
                 {
                     var tex = TxtgTexture.Load(txtgPath);
+                    if (Environment.GetEnvironmentVariable("MC_DEBUG_COMPSELECT") == "1")
+                        Console.WriteLine($"[CompSelect] {tname} ({tex.Format}): R={tex.CompSelect[0]} G={tex.CompSelect[1]} B={tex.CompSelect[2]} A={tex.CompSelect[3]}");
                     var surf = tex.Surfaces[0];
                     string outTex = Path.Combine(outDir, $"{tname}_{tex.Width}x{tex.Height}_{tex.Format}.bin");
                     File.WriteAllBytes(outTex, surf.Data);

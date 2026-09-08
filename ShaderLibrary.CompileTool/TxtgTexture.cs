@@ -64,14 +64,27 @@ namespace ShaderLibrary.CompileTool
         public List<TxtgSurface> Surfaces = new();
         /// <summary>
         /// The container's own real, authored per-texture channel-selector bytes (which SOURCE
-        /// channel - 0=R,1=G,2=B,3=A, plus 4/5 meaning constant-0/constant-1 on some other
-        /// Nintendo texture containers - feeds each OUTPUT channel, in R,G,B,A order). Previously
-        /// parsed and silently discarded (the four header bytes were read into nothing) - every
-        /// texture Marrow has ever loaded fell back to a generic, hardcoded default swizzle
-        /// regardless of what this field actually specified. For the one texture checked so far
-        /// (Cmn_Enemy_DungeonBoss_Eye_Alb) this happens to BE the identity mapping (0,1,2,3), so it
-        /// wasn't the cause of that investigation's bug - but the field is real, and silently
-        /// dropping it is a real latent bug for any OTHER texture with a genuinely custom swizzle.
+        /// channel - 0=R,1=G,2=B,3=A, plus 4/5 meaning constant-0/constant-1 on some other Nintendo
+        /// texture containers, not observed in this game's TXTG data so far - feeds each OUTPUT
+        /// channel, in R,G,B,A order).
+        ///
+        /// A first attempt to wire this up (deriving an ALTERNATE encoding via Ghidra against a
+        /// general BNTX/BRTI trace, applied project-wide) was REVERTED - it broke textures broadly.
+        /// That derivation simply doesn't hold for how TXTG stores this field: cross-checking raw
+        /// bytes straight off romfs for several real textures (bypassing this parser entirely, to
+        /// rule out a parsing bug) shows the ORIGINAL Switch-Toolbox-derived interpretation
+        /// (0=R,1=G,2=B,3=A) is the one that's actually correct here - under it, the overwhelming
+        /// majority of textures carry the trivial identity `[0,1,2,3]` (a genuine no-op, confirmed
+        /// on both a known-good texture AND, in one case, a texture whose own shader math turned out
+        /// to depend on something else entirely - see `Npc_Ganondorf_Miasma_Body_Gn5`'s own
+        /// investigation), while several real "Gn4"/"AO"-style mask textures across UNRELATED
+        /// character models (Zelda, Link, Ganondorf Mummy, MiasmaTentacle) consistently carry the
+        /// genuinely non-trivial `[0,1,1,1]` - "B and A both source real channel G", a standard trick
+        /// for packing extra mask data into a 2-channel BC5 texture's otherwise-constant B/A reads.
+        /// That consistency across unrelated assets is what makes this encoding trustworthy where
+        /// the earlier one wasn't. See <c>Marrow.Core.Assets.TextureCache.ApplySwizzle</c> for where
+        /// this now gets applied - identity values are a safe no-op, so only the genuinely-marked
+        /// minority of textures are affected.
         /// </summary>
         public byte[] CompSelect = [0, 1, 2, 3];
 

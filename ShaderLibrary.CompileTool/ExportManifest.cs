@@ -49,7 +49,20 @@ namespace ShaderLibrary.CompileTool
             (9,  136, 2, "aTexCoord1"),
             (10, 144, 2, "aTexCoord2"),
             (11, 152, 2, "aTexCoord3"),
-            (12, 160, 4, "aColor0"),
+            // Real name is bare "aColor", not "aColor0" - confirmed against every decompiled
+            // shader in this corpus (47 files declare "aColor", zero declare "aColor0"/"aColor1").
+            // BuildVertexArray looks this attribute up BY NAME via glGetAttribLocation, so the
+            // wrong name here doesn't fail loudly - it just silently never finds the attribute,
+            // never binds it, and every vertex reads GL's default (0,0,0,1) instead of the real
+            // per-vertex color data. This is what made Botom_Back__Mt_Body_Miasma_Lower's
+            // vertex-color-driven corruption dissolve always read colorX=0 (confirmed via the
+            // G-buffer step debugger: temp_22, the real in_attr5.x value, showed pure black despite
+            // the raw exported vertex bytes averaging ~0.84) - the alpha-test discard was reading a
+            // hardcoded zero instead of authored per-vertex data, so it fired almost everywhere.
+            // "aColor1" (location 13) is left alone - real, never seen in any shader in this corpus
+            // either, but nothing here actually depends on it being right the way aColor0 turned
+            // out to matter.
+            (12, 160, 4, "aColor"),
             (13, 176, 4, "aColor1"),
         };
         const int VertexStride = 192;
@@ -386,6 +399,7 @@ namespace ShaderLibrary.CompileTool
                 string texName = mat.TextureRefs[idx].Name;
                 string file = "", fmt = "";
                 int w = 0, h = 0;
+                string compSelectField = "";
                 string txtg = Path.Combine(romfsRoot, "TexToGo", texName + ".txtg");
                 if (File.Exists(txtg))
                 {
@@ -394,6 +408,7 @@ namespace ShaderLibrary.CompileTool
                         var t = TxtgTexture.Load(txtg);
                         w = (int)t.Width; h = (int)t.Height; fmt = t.Format.ToString();
                         file = $"{texName}_{w}x{h}_{fmt}.bin";
+                        compSelectField = $", \"comp_select\": [{string.Join(", ", t.CompSelect)}]";
                     }
                     catch { }
                 }
@@ -401,7 +416,7 @@ namespace ShaderLibrary.CompileTool
                 outList.Add($"{{ \"unit\": {loc.FragmentLocation}, \"key\": \"{shaderKey}\", " +
                             $"\"assigned\": \"{assigned}\", \"texture\": \"{texName}\", " +
                             $"\"file\": \"{file}\", \"format\": \"{fmt}\", " +
-                            $"\"width\": {w}, \"height\": {h} }}");
+                            $"\"width\": {w}, \"height\": {h}{compSelectField} }}");
             }
             return outList;
         }

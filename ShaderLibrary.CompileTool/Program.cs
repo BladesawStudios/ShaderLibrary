@@ -192,6 +192,72 @@ namespace ShaderLibrary.CompilerTool
                 return;
             }
 
+            // "--dump-material-samplers <Model> <MaterialName>" prints a material's own Samplers
+            // dictionary (in enumeration order) side-by-side with its TextureRefs list (in list
+            // order) - ExportManifest.BuildSamplers assumes these two are positionally aligned
+            // (mat.Samplers.Keys.ToList().IndexOf(assigned) is used as an index straight into
+            // mat.TextureRefs), which is only true if BfresLibrary preserves the same ordering for
+            // both. This is how to check that assumption for a specific material directly, rather
+            // than trusting it - see the "invisible legs" investigation for why: a texture that
+            // reads real per-pixel data through what should be a constant channel is consistent
+            // with the wrong TextureRef being joined to a sampler key.
+            if (args.Contains("--dump-material-samplers"))
+            {
+                string dmsModel = positional.Length > 1 ? positional[1] : throw new ArgumentException("need a model name");
+                string dmsMaterial = positional.Length > 2 ? positional[2] : throw new ArgumentException("need a material name");
+                string dmsMcPath = RomfsPaths.ModelFile(romfsRoot, dmsModel)
+                                   ?? throw new FileNotFoundException(RomfsPaths.Explain(romfsRoot, dmsModel));
+                byte[] dmsFres = TestMaterialDump.DecompressBfresMc(dmsMcPath);
+                using var dmsMs = new MemoryStream(dmsFres);
+                var dmsResFile = new ResFile(dmsMs, false);
+                var dmsModelObj = dmsResFile.Models[0];
+                Material? dmsMat = dmsModelObj.Materials.Values.FirstOrDefault(m => m.Name == dmsMaterial);
+                if (dmsMat is null)
+                {
+                    Console.WriteLine($"[dump-material-samplers] no material named '{dmsMaterial}' in model '{dmsModel}' - materials present: {string.Join(", ", dmsModelObj.Materials.Keys)}");
+                    return;
+                }
+                var dmsSamplerKeys = dmsMat.Samplers.Keys.ToList();
+                Console.WriteLine($"Material '{dmsMat.Name}' - {dmsSamplerKeys.Count} Samplers, {dmsMat.TextureRefs.Count} TextureRefs");
+                Console.WriteLine("Samplers (enumeration order):");
+                for (int i = 0; i < dmsSamplerKeys.Count; i++)
+                    Console.WriteLine($"  [{i}] {dmsSamplerKeys[i]}");
+                Console.WriteLine("TextureRefs (list order):");
+                for (int i = 0; i < dmsMat.TextureRefs.Count; i++)
+                    Console.WriteLine($"  [{i}] {dmsMat.TextureRefs[i].Name}");
+                Console.WriteLine("ShaderAssign.SamplerAssigns (shaderKey -> assigned):");
+                foreach (var kv in dmsMat.ShaderAssign.SamplerAssigns)
+                    Console.WriteLine($"  {kv.Key} -> {kv.Value}");
+
+                Console.WriteLine();
+                Console.WriteLine("Full Sampler object reflection dump (every property, every entry) -");
+                Console.WriteLine("looking for any per-sampler component-swizzle/select field BfresLibrary exposes");
+                Console.WriteLine("that isn't the texture container's own comp_select:");
+                foreach (var kv in dmsMat.Samplers)
+                {
+                    Console.WriteLine($"  Sampler '{kv.Key}':");
+                    var props = kv.Value.GetType().GetProperties();
+                    foreach (var p in props)
+                    {
+                        object? val;
+                        try { val = p.GetValue(kv.Value); }
+                        catch (Exception ex) { val = $"<threw {ex.GetType().Name}>"; }
+                        Console.WriteLine($"    {p.Name} ({p.PropertyType.Name}) = {val}");
+                        if (val is not null && p.PropertyType.Namespace == "BfresLibrary.GX2")
+                        {
+                            foreach (var p2 in p.PropertyType.GetProperties())
+                            {
+                                object? val2;
+                                try { val2 = p2.GetValue(val); }
+                                catch (Exception ex) { val2 = $"<threw {ex.GetType().Name}>"; }
+                                Console.WriteLine($"      .{p2.Name} ({p2.PropertyType.Name}) = {val2}");
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+
             // "--material-ubo" rebuilds each material's gsys_material block from romfs (the
             // shader's declared layout + defaults, overlaid with the material's own
             // ShaderParams), replacing the untrustworthy live-captured matsrc_*.bin files.

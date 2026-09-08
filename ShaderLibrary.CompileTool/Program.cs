@@ -93,6 +93,24 @@ namespace ShaderLibrary.CompilerTool
                 return;
             }
 
+            // "--rebuild-manifest <ActorOrModelName>" re-runs ONLY step 3 of prepare (the manifest
+            // + shader decompile) into Marrow's own cache - the cheap way to pick up a manifest
+            // schema change (e.g. the wrap_u/wrap_v sampler fields) on an already-prepared model
+            // without re-exporting its geometry/textures too. Requires matubo already built (step 2).
+            if (args.Contains("--rebuild-manifest"))
+            {
+                string actorOrModel = positional.Length > 1 ? positional[1] : "Enemy_Dragon_Darkness";
+                var manifestActor = ActorInfo.Resolve(romfsRoot, actorOrModel);
+                string manifestModel = manifestActor?.ModelName ?? actorOrModel;
+                string manifestMaterialBfsha = Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha");
+                string manifestCacheRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Marrow", "cache");
+                string manifestDataDir = Path.Combine(manifestCacheRoot, manifestModel);
+                string manifestShadersDir = Path.Combine(manifestCacheRoot, "_shaders");
+                Directory.CreateDirectory(manifestShadersDir);
+                ExportManifest.Run(romfsRoot, manifestMaterialBfsha, manifestModel, manifestDataDir, manifestShadersDir);
+                return;
+            }
+
             // "--rebuild-deferred-materials" rebuilds the SHARED deferred-resolve-pass
             // gsys_material blocks (chara_skin, chara_hair, ...) into Marrow's cache - see
             // BuildMaterialUbo.RunSystemDeferred's remarks for why this step was missing from the

@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using BfresLibrary;
+using BfresLibrary.GX2;
 using EffectLibraryTest;
 using ShaderLibrary;
 
@@ -413,10 +414,25 @@ namespace ShaderLibrary.CompileTool
                     catch { }
                 }
 
+                // The real, authored per-sampler U/V wrap mode (GX2's own TexSampler.ClampX/ClampY,
+                // read straight off this material's Sampler resource - see Sampler.Load: on Switch
+                // it's populated via SamplerSwitch.ToTexSampler from the raw WrapModeU/V bytes).
+                // Never read before this - every material texture in the live viewer was uploaded
+                // with GL_REPEAT hardcoded regardless of what the game actually authored, which is
+                // why textures the game clamps (eye irises scrolled by a texture-SRT anim, in
+                // particular) visibly tiled once their UVs moved outside 0..1.
+                string wrapU = "Wrap", wrapV = "Wrap";
+                if (mat.Samplers.TryGetValue(assigned, out var samplerRes))
+                {
+                    wrapU = samplerRes.TexSampler.ClampX.ToString();
+                    wrapV = samplerRes.TexSampler.ClampY.ToString();
+                }
+
                 outList.Add($"{{ \"unit\": {loc.FragmentLocation}, \"key\": \"{shaderKey}\", " +
                             $"\"assigned\": \"{assigned}\", \"texture\": \"{texName}\", " +
                             $"\"file\": \"{file}\", \"format\": \"{fmt}\", " +
-                            $"\"width\": {w}, \"height\": {h}{compSelectField} }}");
+                            $"\"width\": {w}, \"height\": {h}{compSelectField}, " +
+                            $"\"wrap_u\": \"{wrapU}\", \"wrap_v\": \"{wrapV}\" }}");
             }
             return outList;
         }

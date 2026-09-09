@@ -67,6 +67,9 @@
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
     <PackageReference Include="TotkCommon" Version="1.3.3" />
     <PackageReference Include="ZstdNet" Version="1.5.7" />
+    <!-- Same author/ecosystem as TotkCommon above - needed by SkyBinTexture.cs to open
+         Env/GameScene.Nin_NX_NVN.genvb.zs (a SARC) and pull out res/master_field.skybin. -->
+    <PackageReference Include="SarcLibrary" Version="3.3.5" />
   </ItemGroup>
 
 </Project>

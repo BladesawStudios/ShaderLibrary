@@ -525,6 +525,21 @@ namespace ShaderLibrary.CompilerTool
                 return;
             }
 
+            if (args.Contains("--extract-lensflare-shaders"))
+            {
+                TestAglShader.ExtractLensFlareShaders(romfsRoot, TestBenchPath("Shaders", "Decompiled"));
+                return;
+            }
+
+            if (args.Contains("--extract-sky-bodies"))
+            {
+                // The sun disc and the eight moon-phase sprites - see SkyBodyPass. Separately
+                // runnable like every other extraction step, so the decode can be checked without
+                // launching the app.
+                SystemTextures.ExtractSkyBodyTextures(romfsRoot, TestBenchPath("SystemTextures"));
+                return;
+            }
+
             if (args.Contains("--extract-cloud-noise-shader"))
             {
                 // Debug entry point for TestAglShader.ExtractCloudNoiseShader - see its own remarks.

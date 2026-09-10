@@ -482,6 +482,53 @@ namespace ShaderLibrary.CompileTool
         /// </list>
         /// </para>
         /// </remarks>
+        /// <summary>
+        /// The real lens-flare and glare filters (<c>agl::pfx::Glare</c>'s own programs).
+        /// </summary>
+        /// <remarks>
+        /// Small, self-contained screen-space filters - one sampler and one <c>RegisterUBO</c> each
+        /// (192 bytes for the flare, 48 for the blur) - which is the same shape as
+        /// <c>agl_hdr_compose</c>, already the easiest real program in this project to drive.
+        /// <para>
+        /// Macro choices. <c>GHOST_NUM</c> is the number of ghost sprites marched back along the
+        /// sun-to-centre line and is a real quality/appearance choice, not a correctness one; 4 is
+        /// the middle of the authored range. <c>IS_HALO=1</c> adds the ring around the light, which
+        /// is the part that reads as "lens flare" rather than "dots". <c>IS_DISTORTION=0</c>: the
+        /// distortion variant costs the same inputs but chromatically splits the ghosts, and
+        /// without a reference frame to match there is nothing to tune it against.
+        /// <c>BLUR_LV</c> selects the streak length and <c>BLUR_DIR</c> the axis, so the glare needs
+        /// both directions extracted to make a cross.
+        /// </para>
+        /// </remarks>
+        public static void ExtractLensFlareShaders(string romfsRoot, string outDir)
+        {
+            var sharc = OpenArchive(romfsRoot,
+                Path.Combine("Lib", "agl", "agl_resource.Nin_NX_NVN.release.sarc.zs"),
+                "agl_technique_pfx.sharcb");
+
+            SharcfbFile.ShaderProgram Program(string name) =>
+                sharc.Programs.FirstOrDefault(p => p.Name == name)
+                ?? throw new InvalidOperationException($"agl_technique_pfx.sharcb has no \"{name}\" program.");
+
+            DecompileVariant(sharc, Program("flare_filter_flare"), new()
+            {
+                ["GHOST_NUM"] = "4",
+                ["IS_HALO"] = "1",
+                ["IS_DISTORTION"] = "0",
+            }, outDir, "agl_flare_filter_flare");
+
+            foreach (string dir in new[] { "0", "1" })
+            {
+                DecompileVariant(sharc, Program("glare_filter_blur"), new()
+                {
+                    ["BLUR_DIR"] = dir,
+                    ["BLUR_LV"] = "3",
+                    ["COLOR_BIAS"] = "1",
+                    ["IS_FLIP"] = "0",
+                }, outDir, $"agl_glare_filter_blur{dir}");
+            }
+        }
+
         public static void ExtractSkyPostFxShaders(string romfsRoot, string outDir)
         {
             var sharc = OpenArchive(romfsRoot,
@@ -513,6 +560,31 @@ namespace ShaderLibrary.CompileTool
                 ["RENDER_CLOUD"] = "0",
                 ["USE_TONEMAP"] = "0",
             }, outDir, "agl_sky_postfx_sky_sun");
+
+            // USE_ADHOC_FOG=1 counterparts. This macro adds NO sampler and NO block - same
+            // Context@224 / RenderInfo@112 / cTexBakedInscatter as =0, only more pixel bytecode -
+            // so it reads its fog parameters out of slots the =0 variant simply never touches.
+            // Extracting both lets the exact slots be recovered by diffing the two decompiled
+            // programs, which is how they were decoded (see SkyPostFxPass.BuildRenderInfo).
+            // The palette drives it: AfParam_attenuationForGrd/ForSky and FogColor/FogStart/FogEnd
+            // are the per-palette counterparts of master_field.baglsky's own adhoc_fog_* fields.
+            DecompileVariant(sky, new()
+            {
+                ["BAKED_SUNVIEW_NON_LINEAR"] = NonLinear,
+                ["USE_ADHOC_FOG"] = "1",
+                ["RENDER_SUN"] = "0",
+                ["RENDER_CLOUD"] = "0",
+                ["USE_TONEMAP"] = "0",
+            }, outDir, "agl_sky_postfx_sky_fog");
+
+            DecompileVariant(sky, new()
+            {
+                ["BAKED_SUNVIEW_NON_LINEAR"] = NonLinear,
+                ["USE_ADHOC_FOG"] = "1",
+                ["RENDER_SUN"] = "1",
+                ["RENDER_CLOUD"] = "0",
+                ["USE_TONEMAP"] = "0",
+            }, outDir, "agl_sky_postfx_sky_sun_fog");
 
             DecompileVariant(Program("sky_postfx_ground"), new()
             {

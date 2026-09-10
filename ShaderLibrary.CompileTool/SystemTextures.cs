@@ -135,6 +135,102 @@ namespace ShaderLibrary.CompileTool
         }
 
         /// <summary>
+        /// The sun and moon sprites - real romfs assets, unlike the cloud masks which turned out not
+        /// to be files at all.
+        /// </summary>
+        /// <remarks>
+        /// <c>Etc_Sun_A_Alb</c> is 64x64 <b>BC4</b>, i.e. a single-channel disc MASK rather than a
+        /// coloured sprite - the colour comes from the palette's own sun colour at draw time, which
+        /// is why one texture serves every time of day. <c>Etc_Moon_A_Alb.1</c>..<c>.8</c> are
+        /// 256x256 <b>BC5</b> (two channels) and there are EIGHT of them: the moon's phases, picked
+        /// per night rather than masked procedurally.
+        /// </remarks>
+        public static void ExtractSkyBodyTextures(string romfsRoot, string outDir)
+        {
+            Directory.CreateDirectory(outDir);
+            Try(() => ExtractTxtgMask(romfsRoot, outDir, "Etc_Sun_A_Alb", "SunDisc"), "SunDisc");
+            for (int phase = 1; phase <= 8; phase++)
+            {
+                int p = phase;
+                Try(() => ExtractTxtgRg(romfsRoot, outDir, $"Etc_Moon_A_Alb.{p}", $"Moon{p}"), $"Moon{p}");
+            }
+
+            // Per-texture isolation is not defensive padding, it is required: Etc_Moon_A_Alb.5 is
+            // the ONE phase authored in TXTG format 0x107 (an ASTC variant not in TxtgTexture's
+            // table) and it throws. This runs from ViewportPanel's constructor, so an escaping
+            // exception there takes out panel construction and the user loses the whole viewport
+            // over one missing moon phase. SkyBodyPass falls back to the nearest phase it does have.
+            static void Try(Action work, string what)
+            {
+                try { work(); }
+                catch (Exception ex) { Console.WriteLine($"[SystemTextures] {what} unavailable: {ex.Message}"); }
+            }
+        }
+
+        /// <summary>Extracts a two-channel BC5 texture to interleaved RG8.</summary>
+        static void ExtractTxtgRg(string romfsRoot, string outDir, string textureName, string outName)
+        {
+            string path = Path.Combine(romfsRoot, "TexToGo", textureName + ".txtg");
+            if (!File.Exists(path))
+            {
+                Console.WriteLine($"[SystemTextures] '{path}' not found - {outName} unavailable.");
+                return;
+            }
+
+            var tex = TxtgTexture.Load(path);
+            if (tex.Format != TxtgFormat.BC5_UNORM)
+            {
+                Console.WriteLine($"[SystemTextures] '{textureName}' is {tex.Format}, expected BC5_UNORM - skipping.");
+                return;
+            }
+
+            int width = tex.Width, height = tex.Height;
+            byte[] decoded = DecodeBc5(tex.Surfaces[0].Data, width, height);
+            File.WriteAllBytes(Path.Combine(outDir, outName + ".rg8"), decoded);
+            File.WriteAllText(Path.Combine(outDir, outName + ".dims.txt"), $"{width} {height} 2");
+            Console.WriteLine($"[SystemTextures] {outName} <- {textureName}: {width}x{height} BC5, {decoded.Length} bytes -> {outDir}");
+        }
+
+        /// <summary>
+        /// Decodes BC5 (RGTC2/ATI2n) to interleaved two-bytes-per-texel RG.
+        /// </summary>
+        /// <remarks>
+        /// A BC5 block is literally two BC4 blocks back to back - red first, then green - so this
+        /// reuses <see cref="DecodeBc4Block"/> twice per 16-byte block rather than restating the
+        /// palette/index scheme. Decoded on the CPU for the same reason the cloud masks are: it
+        /// always works, and this happens once at extraction time.
+        /// </remarks>
+        static byte[] DecodeBc5(byte[] data, int width, int height)
+        {
+            int blocksX = (width + 3) / 4, blocksY = (height + 3) / 4;
+            var output = new byte[width * height * 2];
+            for (int by = 0; by < blocksY; by++)
+            {
+                for (int bx = 0; bx < blocksX; bx++)
+                {
+                    int blockOffset = (by * blocksX + bx) * 16;
+                    DecodeBc4Block(data, blockOffset, out var rPal, out ulong rIdx);
+                    DecodeBc4Block(data, blockOffset + 8, out var gPal, out ulong gIdx);
+                    for (int ty = 0; ty < 4; ty++)
+                    {
+                        int y = by * 4 + ty;
+                        if (y >= height) continue;
+                        for (int tx = 0; tx < 4; tx++)
+                        {
+                            int x = bx * 4 + tx;
+                            if (x >= width) continue;
+                            int t = ty * 4 + tx;
+                            int o = (y * width + x) * 2;
+                            output[o] = rPal[(int)((rIdx >> (t * 3)) & 0x7)];
+                            output[o + 1] = gPal[(int)((gIdx >> (t * 3)) & 0x7)];
+                        }
+                    }
+                }
+            }
+            return output;
+        }
+
+        /// <summary>
         /// Finds which romfs texture a reference blob actually is, by comparing raw block bytes.
         /// </summary>
         /// <remarks>

@@ -466,6 +466,26 @@ namespace ShaderLibrary.CompilerTool
                 return;
             }
 
+            if (args.Contains("--dump-sarc-entry"))
+            {
+                // Extract one entry from a (dictionary-compressed) SARC. Usage:
+                //   --dump-sarc-entry <romfs> <relative/archive.zs> <entry substring> <out file>
+                string dsRel = positional[1], dsMatch = positional[2], dsOut = positional[3];
+                byte[] dsRaw = System.IO.File.ReadAllBytes(System.IO.Path.Combine(romfsRoot, dsRel.Replace('/', System.IO.Path.DirectorySeparatorChar)));
+                byte[] dsData = TotkCommon.Zstd.IsCompressed(dsRaw) ? TotkCommon.Totk.Zstd.Decompress(dsRaw) : dsRaw;
+                var dsSarc = SarcLibrary.Sarc.FromBinary(new ArraySegment<byte>(dsData));
+                foreach (var kv in dsSarc)
+                {
+                    if (kv.Key.IndexOf(dsMatch, StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+                    System.IO.File.WriteAllBytes(dsOut, kv.Value.ToArray());
+                    Console.WriteLine($"[dump-sarc-entry] {kv.Key} -> {dsOut} ({kv.Value.Count} bytes)");
+                    return;
+                }
+                Console.WriteLine($"[dump-sarc-entry] no entry matching '{dsMatch}'.");
+                return;
+            }
+
             if (args.Contains("--list-sarc"))
             {
                 // List a (zstd-dictionary-compressed) SARC's entries. Usage:

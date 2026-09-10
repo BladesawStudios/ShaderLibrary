@@ -444,6 +444,74 @@ namespace ShaderLibrary.CompilerTool
                 return;
             }
 
+            if (args.Contains("--list-agl-programs"))
+            {
+                // Discovery step for the agl archives - see TestAglShader.ListAglPrograms's own
+                // remarks on why this has to run BEFORE hardcoding a program name/macro combo in a
+                // new Extract*Shader. Optional positional argument filters by substring, e.g.
+                //   --list-agl-programs sky
+                // Add "--combos" to print samplers/blocks per macro combination - the evidence a
+                // macro choice for a new Extract*Shader should actually be based on.
+                string? filter = positional.Length > 1 ? positional[1] : null;
+                TestAglShader.ListAglPrograms(romfsRoot, filter, args.Contains("--combos"));
+                return;
+            }
+
+            if (args.Contains("--extract-cloud-shader"))
+            {
+                // Debug entry point for TestAglShader.ExtractCloudShader - the same automated
+                // extraction ModelPreparer.EnsureCloudShader calls at Marrow.UI startup, exposed
+                // here so it can be re-run/inspected standalone without launching the full app.
+                TestAglShader.ExtractCloudShader(romfsRoot, TestBenchPath("Shaders", "Decompiled"));
+                return;
+            }
+
+            if (args.Contains("--list-sarc"))
+            {
+                // List a (zstd-dictionary-compressed) SARC's entries. Usage:
+                //   --list-sarc <romfs> <relative/path.sarc.zs> [name filter]
+                string sarcRel = positional[1];
+                string? sarcFilter = positional.Length > 2 ? positional[2] : null;
+                string sarcFull = System.IO.Path.Combine(romfsRoot, sarcRel.Replace('/', System.IO.Path.DirectorySeparatorChar));
+                byte[] sarcRaw = System.IO.File.ReadAllBytes(sarcFull);
+                byte[] sarcData = TotkCommon.Zstd.IsCompressed(sarcRaw) ? TotkCommon.Totk.Zstd.Decompress(sarcRaw) : sarcRaw;
+                var listed = SarcLibrary.Sarc.FromBinary(new ArraySegment<byte>(sarcData));
+                int shown = 0;
+                foreach (var kv in listed)
+                {
+                    if (sarcFilter != null && kv.Key.IndexOf(sarcFilter, StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+                    Console.WriteLine($"   {kv.Key}  ({kv.Value.Count} bytes)");
+                    shown++;
+                }
+                Console.WriteLine($"[list-sarc] {shown} entries shown.");
+                return;
+            }
+
+            if (args.Contains("--find-txtg-by-bytes"))
+            {
+                // Identify which romfs texture a captured surface actually is, by raw block bytes -
+                // see SystemTextures.FindTxtgByBytes for why name/concept searching is not enough.
+                // Usage: --find-txtg-by-bytes <romfs> <reference.bin>
+                SystemTextures.FindTxtgByBytes(romfsRoot, positional[1]);
+                return;
+            }
+
+            if (args.Contains("--extract-sky-shaders"))
+            {
+                // Debug entry point for TestAglShader.ExtractSkyPostFxShaders - the real
+                // agl::pfx::Sky programs (per-frame postfx + the Bruneton precompute chain).
+                TestAglShader.ExtractSkyPostFxShaders(romfsRoot, TestBenchPath("Shaders", "Decompiled"));
+                return;
+            }
+
+            if (args.Contains("--extract-cloud-noise-shader"))
+            {
+                // Debug entry point for TestAglShader.ExtractCloudNoiseShader - see its own remarks.
+                TestAglShader.ExtractCloudNoiseShader(romfsRoot, TestBenchPath("Shaders", "Decompiled"));
+                return;
+            }
+
             if (verifyLookup)
             {
                 TestTOTK.VerifyProgramLookup(

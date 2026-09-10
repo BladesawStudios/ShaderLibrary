@@ -24,6 +24,51 @@ namespace ShaderLibrary.CompileTool
         const string Suffix = ".bfres.mc";
 
         /// <summary>Resolve a model name to its .bfres.mc path, or null if it cannot be found.</summary>
+
+        /// <summary>
+        /// A usable on-disk path for a romfs file that ships zstd-compressed, decompressing it to a
+        /// cache directory the first time.
+        /// </summary>
+        /// <remarks>
+        /// Shipped romfs has <c>material.Product.110.product.Nin_NX_NVN.bfsha.zs</c>, not a plain
+        /// <c>.bfsha</c> - every one of these under <c>Shader/</c> is compressed. Code that took the
+        /// uncompressed path only worked for someone who had decompressed it by hand beforehand,
+        /// and failed with "Could not find file" on a clean dump, which is exactly the portability
+        /// hole this project is not supposed to have.
+        ///
+        /// Cached beside Marrow's other derived data rather than written back into romfs: the ROM
+        /// is the user's own dump and this must not modify it. Decompressing a ~100MB archive takes
+        /// a moment, so the cached copy is reused on every later run.
+        /// </remarks>
+        public static string ResolveMaybeCompressed(string plainPath)
+        {
+            if (File.Exists(plainPath))
+                return plainPath;
+
+            string compressed = plainPath + ".zs";
+            if (!File.Exists(compressed))
+                return plainPath;   // let the caller report the missing file as it would anyway
+
+            string cacheDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Marrow", "cache", "_romfs_decompressed");
+            Directory.CreateDirectory(cacheDir);
+            string cached = Path.Combine(cacheDir, Path.GetFileName(plainPath));
+
+            if (File.Exists(cached) && new FileInfo(cached).Length > 0)
+                return cached;
+
+            Console.WriteLine($"[RomfsPaths] decompressing '{Path.GetFileName(compressed)}' -> {cached}");
+            byte[] raw = File.ReadAllBytes(compressed);
+            byte[] plain = TotkCommon.Zstd.IsCompressed(raw) ? TotkCommon.Totk.Zstd.Decompress(raw) : raw;
+            // Written via a temp file so an interrupted run cannot leave a truncated cache entry
+            // that every later run would then happily reuse.
+            string tmp = cached + ".tmp";
+            File.WriteAllBytes(tmp, plain);
+            File.Move(tmp, cached, overwrite: true);
+            return cached;
+        }
+
         public static string? ModelFile(string romfsRoot, string name)
         {
             string dir = Path.Combine(romfsRoot, "Model");

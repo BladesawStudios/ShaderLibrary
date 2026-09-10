@@ -88,7 +88,7 @@ namespace ShaderLibrary.CompilerTool
                                              "Marrow", "cache", matModel, "matubo");
                 Directory.CreateDirectory(matOut);
                 BuildMaterialUbo.Run(
-                    Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha"),
+                    RomfsPaths.ResolveMaybeCompressed(Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha")),
                     matMc, matOut);
                 return;
             }
@@ -102,7 +102,7 @@ namespace ShaderLibrary.CompilerTool
                 string actorOrModel = positional.Length > 1 ? positional[1] : "Enemy_Dragon_Darkness";
                 var manifestActor = ActorInfo.Resolve(romfsRoot, actorOrModel);
                 string manifestModel = manifestActor?.ModelName ?? actorOrModel;
-                string manifestMaterialBfsha = Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha");
+                string manifestMaterialBfsha = RomfsPaths.ResolveMaybeCompressed(Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha"));
                 string manifestCacheRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Marrow", "cache");
                 string manifestDataDir = Path.Combine(manifestCacheRoot, manifestModel);
                 string manifestShadersDir = Path.Combine(manifestCacheRoot, "_shaders");
@@ -209,7 +209,7 @@ namespace ShaderLibrary.CompilerTool
                 // positional[0] is already romfsRoot (consumed above) - this flag's own args start at [1].
                 string bfshaArg = positional.Length > 1
                     ? positional[1]
-                    : Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha");
+                    : RomfsPaths.ResolveMaybeCompressed(Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha"));
                 string outDirArg = positional.Length > 2
                     ? positional[2]
                     : Path.Combine(Path.GetTempPath(), "marrow_uniform_blocks");
@@ -303,7 +303,7 @@ namespace ShaderLibrary.CompilerTool
             {
                 string model = positional.Length > 1 ? positional[1] : "Weapon_Sword_070";
                 BuildMaterialUbo.Run(
-                    Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha"),
+                    RomfsPaths.ResolveMaybeCompressed(Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha")),
                     RomfsPaths.ModelFile(romfsRoot, model)
                         ?? throw new FileNotFoundException(RomfsPaths.Explain(romfsRoot, model)),
                     TestBenchPath("data", "matubo"));
@@ -364,7 +364,7 @@ namespace ShaderLibrary.CompilerTool
             if (args.Contains("--render-info"))
             {
                 string model = positional.Length > 1 ? positional[1] : "Weapon_Sword_070";
-                string bfsha = Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha");
+                string bfsha = RomfsPaths.ResolveMaybeCompressed(Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha"));
                 var arc = new BfshaFile(bfsha);
                 string? riPath = RomfsPaths.ModelFile(romfsRoot, model);
                 if (riPath == null) { Console.WriteLine(RomfsPaths.Explain(romfsRoot, model)); return; }
@@ -421,7 +421,7 @@ namespace ShaderLibrary.CompilerTool
             {
                 string model = positional.Length > 1 ? positional[1] : "Weapon_Sword_070";
                 ExportManifest.Run(romfsRoot,
-                    Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha"),
+                    RomfsPaths.ResolveMaybeCompressed(Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha")),
                     model,
                     TestBenchPath("data"),
                     TestBenchPath("Shaders", "Decompiled"));
@@ -536,7 +536,7 @@ namespace ShaderLibrary.CompilerTool
             {
                 TestTOTK.VerifyProgramLookup(
                     Path.Combine(romfsRoot, "Model", "Weapon_Sword_070.Weapon_Sword_070.bfres.mc"),
-                    Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha"));
+                    RomfsPaths.ResolveMaybeCompressed(Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha")));
                 return;
             }
 
@@ -562,7 +562,7 @@ namespace ShaderLibrary.CompilerTool
                 return;
             }
 
-            string bfshaPath = Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha");
+            string bfshaPath = RomfsPaths.ResolveMaybeCompressed(Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha"));
             string outDir = TestBenchPath("Shaders", "Decompiled");
             if (File.Exists(bfshaPath))
                 DecompilerRunner.Run(romfsRoot, bfshaPath, outDir);

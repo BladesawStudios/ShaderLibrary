@@ -77,7 +77,7 @@ namespace ShaderLibrary.CompileTool
         {
             TotkCommon.Totk.Config.GamePath = romfsRoot;
 
-            string bfshaPath = Path.Combine(romfsRoot, "Shader", "system.Product.110.product.Nin_NX_NVN.bfsha");
+            string bfshaPath = RomfsPaths.ResolveMaybeCompressed(Path.Combine(romfsRoot, "Shader", "system.Product.110.product.Nin_NX_NVN.bfsha"));
             byte[] bfshaBytes = LoadPossiblyCompressed(bfshaPath);
             var bfsha = new BfshaFile(new MemoryStream(bfshaBytes));
 
@@ -115,8 +115,8 @@ namespace ShaderLibrary.CompileTool
             // what matters for applying these values elsewhere (confirmed identical offsets/names
             // to the "material" shading model's own gsys_scene_material block), not which archive
             // happens to declare it - this is one shared, engine-wide UBO either way.
-            string materialBfshaPath = Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha");
-            string systemBfshaPath = Path.Combine(romfsRoot, "Shader", "system.Product.110.product.Nin_NX_NVN.bfsha");
+            string materialBfshaPath = RomfsPaths.ResolveMaybeCompressed(Path.Combine(romfsRoot, "Shader", "material.Product.110.product.Nin_NX_NVN.bfsha"));
+            string systemBfshaPath = RomfsPaths.ResolveMaybeCompressed(Path.Combine(romfsRoot, "Shader", "system.Product.110.product.Nin_NX_NVN.bfsha"));
             var materialBfsha = new BfshaFile(new MemoryStream(LoadPossiblyCompressed(materialBfshaPath)));
             var systemBfsha = new BfshaFile(new MemoryStream(LoadPossiblyCompressed(systemBfshaPath)));
 

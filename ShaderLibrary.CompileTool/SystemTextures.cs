@@ -83,6 +83,50 @@ namespace ShaderLibrary.CompileTool
         /// in the capture reuse one image across their pair, which is why one texture per pair here
         /// matches the real binding pattern.
         /// </summary>
+        /// <summary>
+        /// Installs the three shipped, captured cloud masks (raw 512x512 BC4 blocks) by decoding
+        /// them to the same R8 form <c>CloudDomePass</c> already loads.
+        /// </summary>
+        /// <remarks>
+        /// <b>This is the one place the project ships game data instead of extracting it, and it is
+        /// deliberate and temporary</b> - see <c>res/cloud/README.md</c> for the full reasoning. The
+        /// short version: these masks are not romfs assets at all (a byte-exact scan of all ~29,000
+        /// <c>TexToGo</c> textures finds no match), they are baked at runtime by <c>noise_cloud</c>,
+        /// and the parameters that bake would need are not authored anywhere findable. The previous
+        /// name-based guesses were confirmed wrong against a capture, with correlations of ~0.01.
+        ///
+        /// Unlike a captured sky LUT these are safe to ship as a stopgap: they are static, baked
+        /// once from static parameters, so they do not vary with time of day or weather the way the
+        /// atmosphere does.
+        /// </remarks>
+        public static bool InstallCapturedCloudMasks(string bc4Dir, string outDir)
+        {
+            string[] names = { "CloudBase", "CloudNoise", "CloudNoiseBlend" };
+            if (!Directory.Exists(bc4Dir) || names.Any(n => !File.Exists(Path.Combine(bc4Dir, n + ".bc4"))))
+                return false;
+
+            Directory.CreateDirectory(outDir);
+            foreach (string name in names)
+            {
+                byte[] blocks = File.ReadAllBytes(Path.Combine(bc4Dir, name + ".bc4"));
+                // 512x512 BC4 is 8 bytes per 4x4 block; anything else means the file is not what
+                // this expects, and silently decoding it would produce plausible-looking garbage.
+                const int w = 512, h = 512;
+                int expected = (w / 4) * (h / 4) * 8;
+                if (blocks.Length != expected)
+                {
+                    Console.WriteLine($"[SystemTextures] '{name}.bc4' is {blocks.Length} bytes, expected {expected} - skipping.");
+                    return false;
+                }
+
+                byte[] decoded = DecodeBc4Volume(blocks, w, h, 1);
+                File.WriteAllBytes(Path.Combine(outDir, name + ".r8"), decoded);
+                File.WriteAllText(Path.Combine(outDir, name + ".dims.txt"), $"{w} {h} 1");
+            }
+            Console.WriteLine($"[SystemTextures] installed 3 captured cloud masks (512x512) -> {outDir}");
+            return true;
+        }
+
         public static void ExtractCloudTextures(string romfsRoot, string outDir)
         {
             Directory.CreateDirectory(outDir);
@@ -259,15 +303,22 @@ namespace ShaderLibrary.CompileTool
             palette = new byte[8];
             palette[0] = r0;
             palette[1] = r1;
+            // The interpolation weights must SUM TO THE DENOMINATOR, or every interpolated entry is
+            // systematically too dark. This previously read ((6 - i) * r0 + i * r1) / 7 and
+            // ((4 - i) * r0 + i * r1) / 5 - numerators summing to 6 and 4 against denominators of
+            // 7 and 5 - which quietly darkened six of the eight palette entries in every block.
+            // Caught by decoding the same captured texture with an independent decoder and finding
+            // differences of up to 31/255, far past anything rounding could explain. It affected
+            // every BC4 surface decoded here, the cTex_Proc3DNoise volume included.
             if (r0 > r1)
             {
                 for (int i = 1; i <= 6; i++)
-                    palette[1 + i] = (byte)(((6 - i) * r0 + i * r1) / 7);
+                    palette[1 + i] = (byte)(((7 - i) * r0 + i * r1) / 7);
             }
             else
             {
                 for (int i = 1; i <= 4; i++)
-                    palette[1 + i] = (byte)(((4 - i) * r0 + i * r1) / 5);
+                    palette[1 + i] = (byte)(((5 - i) * r0 + i * r1) / 5);
                 palette[6] = 0;
                 palette[7] = 255;
             }

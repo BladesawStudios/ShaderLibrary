@@ -70,6 +70,16 @@ namespace ShaderLibrary.CompileTool
             }
         }
 
+        public static void ExtractPreshadingFilter(string romfsRoot, string outDir)
+        {
+            string sarcPath = Path.Combine(romfsRoot, "Shader", "ApplicationPackage.Nin_NX_NVN.release.sarc.zs");
+            byte[] raw = File.ReadAllBytes(sarcPath);
+            byte[] decompressed = TotkCommon.Zstd.IsCompressed(raw) ? TotkCommon.Totk.Zstd.Decompress(raw) : raw;
+            var sarc = SarcLibrary.Sarc.FromBinary(new ArraySegment<byte>(decompressed));
+            var sharc = new SharcfbFile(new MemoryStream(sarc["AglShader.sharcb"].ToArray()));
+            Run(sharc, "AglShader.sharcb (from ApplicationPackage.Nin_NX_NVN.release.sarc.zs)", outDir, "preshading_filter");
+        }
+
         /// <summary>
         /// Extracts the real cloud billboard shader straight from romfs: unpacks
         /// <c>Lib/agl/agl_resource.Nin_NX_NVN.release.sarc.zs</c> (zstd, a completely different

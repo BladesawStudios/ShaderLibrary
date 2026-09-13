@@ -124,6 +124,14 @@ namespace ShaderLibrary.CompilerTool
                 return;
             }
 
+            if (args.Contains("--extract-preshading-filter"))
+            {
+                string preshadingFilterOutDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                                             "Marrow", "cache", "_shaders");
+                TestAglShader.ExtractPreshadingFilter(romfsRoot, preshadingFilterOutDir);
+                return;
+            }
+
             if (args.Contains("--inspect-matanim"))
             {
                 string target = positional.Length > 1 ? positional[1] : "Enemy_Dragon_Darkness";

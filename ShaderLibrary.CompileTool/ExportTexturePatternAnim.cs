@@ -149,7 +149,7 @@ namespace ShaderLibrary.CompileTool
             string romfsRoot, string textureName, int index)
         {
             string name = DedupeName(romfsRoot, textureName, index);
-            string txtg = Path.Combine(romfsRoot, "TexToGo", name + ".txtg");
+            string txtg = RomfsOverlay.Resolve(romfsRoot, "TexToGo", name + ".txtg");
             if (!File.Exists(txtg))
             {
                 Console.WriteLine($"[ExportTestBench] texture pattern anim references '{textureName}', which TexToGo/ does not have.");
@@ -185,7 +185,7 @@ namespace ShaderLibrary.CompileTool
         /// </summary>
         static string DedupeName(string romfsRoot, string textureName, int index)
         {
-            if (File.Exists(Path.Combine(romfsRoot, "TexToGo", textureName + ".txtg")))
+            if (File.Exists(RomfsOverlay.Resolve(romfsRoot, "TexToGo", textureName + ".txtg")))
                 return textureName;
 
             string suffix = index.ToString(CultureInfo.InvariantCulture);
@@ -193,7 +193,7 @@ namespace ShaderLibrary.CompileTool
                 return textureName;
 
             string stripped = textureName[..^suffix.Length];
-            if (!File.Exists(Path.Combine(romfsRoot, "TexToGo", stripped + ".txtg")))
+            if (!File.Exists(RomfsOverlay.Resolve(romfsRoot, "TexToGo", stripped + ".txtg")))
                 return textureName;
 
             Console.WriteLine($"[ExportTestBench] texture pattern anim entry {index} '{textureName}' is BfresLibrary's " +

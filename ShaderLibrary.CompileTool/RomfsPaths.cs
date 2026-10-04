@@ -69,26 +69,26 @@ namespace ShaderLibrary.CompileTool
             return cached;
         }
 
+        /// <remarks>Every lookup goes through <see cref="RomfsOverlay"/>, so an enabled mod's replacement (or brand-new) model wins over the base dump's.</remarks>
         public static string? ModelFile(string romfsRoot, string name)
         {
-            string dir = Path.Combine(romfsRoot, "Model");
-            if (!Directory.Exists(dir))
+            if (!RomfsOverlay.DirectoryExists(romfsRoot, "Model"))
                 return null;
 
             // 1. The caller already gave the full "<pack>.<model>" stem.
-            string direct = Path.Combine(dir, name + Suffix);
+            string direct = RomfsOverlay.Resolve(romfsRoot, "Model", name + Suffix);
             if (File.Exists(direct))
                 return direct;
 
             // 2. The doubled convention.
-            string doubled = Path.Combine(dir, $"{name}.{name}{Suffix}");
+            string doubled = RomfsOverlay.Resolve(romfsRoot, "Model", $"{name}.{name}{Suffix}");
             if (File.Exists(doubled))
                 return doubled;
 
             // 3. Just the model half - only if exactly one file ends with it, otherwise the
             //    caller is told about the ambiguity rather than being handed an arbitrary pick.
-            var hits = Directory.GetFiles(dir, $"*.{name}{Suffix}");
-            return hits.Length == 1 ? hits[0] : null;
+            var hits = RomfsOverlay.EnumerateFiles(romfsRoot, "Model", $"*.{name}{Suffix}").ToArray();
+            return hits.Length == 1 ? RomfsOverlay.Resolve(romfsRoot, "Model", Path.GetFileName(hits[0])) : null;
         }
 
         /// <summary>
@@ -98,17 +98,17 @@ namespace ShaderLibrary.CompileTool
         public static string Explain(string romfsRoot, string name)
         {
             string dir = Path.Combine(romfsRoot, "Model");
-            if (!Directory.Exists(dir))
+            if (!RomfsOverlay.DirectoryExists(romfsRoot, "Model"))
                 return $"no Model directory under \"{romfsRoot}\"";
 
-            var ambiguous = Directory.GetFiles(dir, $"*.{name}{Suffix}");
+            var ambiguous = RomfsOverlay.EnumerateFiles(romfsRoot, "Model", $"*.{name}{Suffix}").ToArray();
             if (ambiguous.Length > 1)
                 return $"\"{name}\" is ambiguous - it matches {ambiguous.Length} files. Use the full stem, e.g.\n"
                        + string.Join("\n", ambiguous.Take(6).Select(
                              f => "    " + Path.GetFileName(f)[..^Suffix.Length]));
 
             string needle = name.Contains('.') ? name.Split('.').Last() : name;
-            var near = Directory.GetFiles(dir, "*" + Suffix)
+            var near = RomfsOverlay.EnumerateFiles(romfsRoot, "Model", "*" + Suffix)
                                 .Select(f => Path.GetFileName(f)[..^Suffix.Length])
                                 .Where(n => n.Contains(needle, StringComparison.OrdinalIgnoreCase))
                                 .Take(8).ToList();

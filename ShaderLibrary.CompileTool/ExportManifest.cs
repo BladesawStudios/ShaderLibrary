@@ -401,7 +401,7 @@ namespace ShaderLibrary.CompileTool
                 string file = "", fmt = "";
                 int w = 0, h = 0;
                 string compSelectField = "";
-                string txtg = Path.Combine(romfsRoot, "TexToGo", texName + ".txtg");
+                string txtg = RomfsOverlay.Resolve(romfsRoot, "TexToGo", texName + ".txtg");
                 if (File.Exists(txtg))
                 {
                     try

@@ -36,7 +36,7 @@ namespace ShaderLibrary.CompileTool
         /// <summary>Null if there's no <c>Pack/Actor/&lt;actorName&gt;.pack.zs</c> at all (not every model - props, some creatures - is a full "Actor").</summary>
         public static Resolved? Resolve(string romfsRoot, string actorName)
         {
-            string packPath = Path.Combine(romfsRoot, "Pack", "Actor", $"{actorName}.pack.zs");
+            string packPath = RomfsOverlay.Resolve(romfsRoot, "Pack", "Actor", $"{actorName}.pack.zs");
             if (!File.Exists(packPath))
                 return null;
 

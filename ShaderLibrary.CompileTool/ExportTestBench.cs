@@ -437,7 +437,7 @@ namespace ShaderLibrary.CompileTool
             TotkCommon.Totk.Config.GamePath = romfsRoot;
             foreach (string pack in animPackNames)
             {
-                string path = Path.Combine(romfsRoot, "Model", $"{pack}.anim.bfres.zs");
+                string path = RomfsOverlay.Resolve(romfsRoot, "Model", $"{pack}.anim.bfres.zs");
                 if (!File.Exists(path))
                 {
                     Console.WriteLine($"[ExportTestBench] Actor named anim archive '{pack}.anim.bfres.zs' not found under Model/ - skipping.");
@@ -461,13 +461,14 @@ namespace ShaderLibrary.CompileTool
         public static void ExportExternalAnims(string romfsRoot, string modelName, string outDir, AnimExportState state)
         {
             string pack = modelName.Split('.')[0];
-            string modelDir = Path.Combine(romfsRoot, "Model");
-            if (!Directory.Exists(modelDir))
+            if (!RomfsOverlay.DirectoryExists(romfsRoot, "Model"))
                 return;
 
             TotkCommon.Totk.Config.GamePath = romfsRoot;
-            foreach (string path in Directory.EnumerateFiles(modelDir, $"{pack}*.anim.bfres.zs"))
+            foreach (string found in RomfsOverlay.EnumerateFiles(romfsRoot, "Model", $"{pack}*.anim.bfres.zs").ToList())
             {
+                // Re-resolved by name so the choice of layer is recorded for cache staleness.
+                string path = RomfsOverlay.Resolve(romfsRoot, "Model", Path.GetFileName(found));
                 if (LoadAnimArchive(path) is { } animResFile)
                     ExportAnimsFromResFile(romfsRoot, animResFile, modelName, outDir, state);
             }
@@ -717,7 +718,9 @@ namespace ShaderLibrary.CompileTool
 
             foreach (var tname in texNames)
             {
-                string txtgPath = Path.Combine(romfsRoot, "TexToGo", tname + ".txtg");
+                // Through the overlay: a texture-replacement mod wins here even when the model
+                // itself came from the base dump.
+                string txtgPath = RomfsOverlay.Resolve(romfsRoot, "TexToGo", tname + ".txtg");
                 if (!File.Exists(txtgPath))
                 {
                     Console.WriteLine($"[ExportTestBench] Texture not found: {txtgPath}");

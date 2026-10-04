@@ -59,13 +59,15 @@ namespace ShaderLibrary.CompileTool
         static ulong[]? _keys;
         static long _entriesBase;
         static readonly Dictionary<ulong, string?> _cache = new();
+        static int _loadedVersion = -1;
+        static string? _loadedRoot;
 
         public static string? Lookup(ulong key)
         {
+            EnsureLoaded();   // first, so a mod-set change clears _cache before it is consulted
             if (_cache.TryGetValue(key, out string? cached))
                 return cached;
 
-            EnsureLoaded();
             string? result = null;
             if (_keys != null)
             {
@@ -94,14 +96,23 @@ namespace ShaderLibrary.CompileTool
 
         static void EnsureLoaded()
         {
-            if (_data != null)
+            // A mod that adds custom materials can ship its own extended copy of this table, so it
+            // is resolved through the overlay - and reloaded whenever the romfs root or the active
+            // mod set changes, since every name it hands out depends on which copy won.
+            if (_data != null && _loadedVersion == RomfsOverlay.Version && _loadedRoot == RomfsRoot)
                 return;
 
             if (string.IsNullOrEmpty(RomfsRoot))
                 throw new InvalidOperationException(
                     $"{nameof(ExternalBinaryStringTable)}.{nameof(RomfsRoot)} must be set before resolving TotK V10 material names.");
 
-            string path = Path.Combine(RomfsRoot!, "Shader", "ExternalBinaryString.bfres.mc");
+            _data = null;
+            _keys = null;
+            _cache.Clear();
+            _loadedVersion = RomfsOverlay.Version;
+            _loadedRoot = RomfsRoot;
+
+            string path = RomfsOverlay.Resolve(RomfsRoot!, "Shader", "ExternalBinaryString.bfres.mc");
             if (!File.Exists(path))
                 throw new FileNotFoundException(
                     $"TotK's shared string table not found at '{path}' - needed to resolve V10 RenderInfo/ShaderParam/Option names.", path);

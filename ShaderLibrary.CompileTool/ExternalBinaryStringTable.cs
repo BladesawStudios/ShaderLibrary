@@ -62,7 +62,16 @@ namespace ShaderLibrary.CompileTool
         static int _loadedVersion = -1;
         static string? _loadedRoot;
 
+        /// <summary>Models are prepared on several threads at once; the table and its cache are shared.</summary>
+        static readonly object Gate = new();
+
         public static string? Lookup(ulong key)
+        {
+            lock (Gate)
+                return LookupLocked(key);
+        }
+
+        static string? LookupLocked(ulong key)
         {
             EnsureLoaded();   // first, so a mod-set change clears _cache before it is consulted
             if (_cache.TryGetValue(key, out string? cached))

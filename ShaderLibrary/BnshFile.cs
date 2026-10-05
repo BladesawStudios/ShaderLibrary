@@ -101,7 +101,15 @@ namespace ShaderLibrary
 
         public class ShaderVariation 
         {
-            private BnshShaderProgram _program;
+            private volatile BnshShaderProgram _program;
+
+            /// <summary>
+            /// Every variation reads through the same open file, by seeking it and reading - so two
+            /// threads loading programs at once read each other's bytes. One archive is shared by
+            /// every model being prepared in parallel, so loads take turns; a program is read once
+            /// and kept, so this costs nothing after the first time.
+            /// </summary>
+            private static readonly object LoadGate = new object();
 
             /// <summary>
             /// The shader program instance.
@@ -112,7 +120,13 @@ namespace ShaderLibrary
                 {
                     // Read as needed. Bnsh has 1000s of programs, so it is more efficent to load as needed.
                     if (_program == null)
-                        _program = BnshLoader.ReadBnshShaderProgram(this);
+                    {
+                        lock (LoadGate)
+                        {
+                            if (_program == null)
+                                _program = BnshLoader.ReadBnshShaderProgram(this);
+                        }
+                    }
                     return _program;
                 } set => _program = value;
             }

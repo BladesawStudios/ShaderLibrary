@@ -93,7 +93,7 @@ namespace ShaderLibrary.CompileTool
             // Decompile each program ONCE, keyed by index - many materials share a program, and
             // naming the file by index (not by shape) is what lets the manifest reference it.
             var decompiled = new HashSet<int>();
-            var bfsha = new BfshaFile(bfshaPath);
+            var bfsha = SharedBfsha.Load(bfshaPath);
             string mcPath = RomfsPaths.ModelFile(romfsRoot, modelName)
                             ?? throw new FileNotFoundException(RomfsPaths.Explain(romfsRoot, modelName));
             byte[] fres = TestMaterialDump.DecompressBfresMc(mcPath);
@@ -304,8 +304,40 @@ namespace ShaderLibrary.CompileTool
                    " }";
         }
 
+        /// <summary>
+        /// Ends every decompiled file. Bumped when the decompiler's output changes, so a program
+        /// already in the shared shader directory is decompiled again rather than reused - the
+        /// directory is keyed only by shading model + program index, which a decompiler fix does
+        /// not change. A trailing comment is inert GLSL, and each file vouches for itself.
+        /// </summary>
+        const string DecompilerMarker = "// wrs-decompiler 1";
+
+        static bool IsCurrent(string path)
+        {
+            try { return File.Exists(path) && File.ReadAllText(path).TrimEnd().EndsWith(DecompilerMarker, StringComparison.Ordinal); }
+            catch (IOException) { return false; }
+        }
+
         static void DecompileProgram(BnshFile.BnshShaderProgram binProg, string dir, string label)
         {
+            // The directory is shared by every model and, when preparing many at once, by every
+            // worker: a program another model already decompiled with this decompiler is reused
+            // as it is, and a new one is written aside and moved into place, so no reader - or
+            // second writer - ever sees half a file. Within one process, two models needing the same
+            // program take turns on it, so the second finds it done rather than racing the first.
+            lock (DecompileGates.GetOrAdd(Path.Combine(dir, label), _ => new object()))
+                DecompileProgramLocked(binProg, dir, label);
+        }
+
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> DecompileGates =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        static void DecompileProgramLocked(BnshFile.BnshShaderProgram binProg, string dir, string label)
+        {
+            if ((binProg.VertexShader?.ByteCode == null || IsCurrent(Path.Combine(dir, $"{label}_extracted.vert")))
+                && (binProg.FragmentShader?.ByteCode == null || IsCurrent(Path.Combine(dir, $"{label}_extracted.frag"))))
+                return;
+
             foreach (var (code, reflect, ext) in new[]
                      {
                          (binProg.VertexShader, binProg.VertexShaderReflection, "vert"),
@@ -314,14 +346,20 @@ namespace ShaderLibrary.CompileTool
             {
                 if (code?.ByteCode == null)
                     continue;
+                string target = Path.Combine(dir, $"{label}_extracted.{ext}");
+                string temp = $"{target}.{Environment.ProcessId}.{Environment.CurrentManagedThreadId}.tmp";
                 try
                 {
-                    File.WriteAllText(Path.Combine(dir, $"{label}_extracted.{ext}"),
-                                      ShaderExtract.GetCode(code, reflect));
+                    File.WriteAllText(temp, ShaderExtract.GetCode(code, reflect).TrimEnd() + "\n" + DecompilerMarker + "\n");
+                    File.Move(temp, target, overwrite: true);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"   [decompile {label}.{ext} FAILED] {ex.Message}");
+                    // Another process may have just moved the same program into place; whichever
+                    // copy won is identical, and the loser's temp file must not be left behind.
+                    try { File.Delete(temp); } catch (IOException) { }
+                    if (!IsCurrent(target))
+                        Console.WriteLine($"   [decompile {label}.{ext} FAILED] {ex.Message}");
                 }
             }
             Console.WriteLine($"   decompiled -> {label}_extracted.vert/.frag");

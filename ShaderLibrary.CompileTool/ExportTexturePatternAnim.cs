@@ -157,7 +157,7 @@ namespace ShaderLibrary.CompileTool
             }
             try
             {
-                var t = TxtgTexture.Load(txtg);
+                var t = TxtgTexture.Load(txtg, surfaces: 0);
                 int w = (int)t.Width, h = (int)t.Height;
                 string fmt = t.Format.ToString();
                 return (name, $"{name}_{w}x{h}_{fmt}.bin", fmt, w, h);

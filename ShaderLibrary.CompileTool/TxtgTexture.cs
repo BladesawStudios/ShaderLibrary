@@ -130,13 +130,20 @@ namespace ShaderLibrary.CompileTool
             public uint Size;
         }
 
-        public static TxtgTexture Load(string path)
+        /// <param name="surfaces">
+        /// How many surfaces to decode, in file order (every array layer's mip 0 first, then each
+        /// layer's mip 1, ...): 0 reads only the header, 1 only the first layer's mip 0. Each one
+        /// is a zstd decompress plus a deswizzle, and preparation only ever uses the header or
+        /// <c>Surfaces[0]</c> - decoding all of them made a 121-layer, 11-mip material array cost
+        /// 1331 surfaces to export one, and its 1x1 tail mips panic tegra_swizzle.
+        /// </param>
+        public static TxtgTexture Load(string path, int surfaces = int.MaxValue)
         {
             using var fs = File.OpenRead(path);
-            return Load(fs);
+            return Load(fs, surfaces);
         }
 
-        public static TxtgTexture Load(Stream stream)
+        public static TxtgTexture Load(Stream stream, int surfaces = int.MaxValue)
         {
             using var reader = new BinaryReader(stream, System.Text.Encoding.ASCII, leaveOpen: true);
 
@@ -185,6 +192,7 @@ namespace ShaderLibrary.CompileTool
 
             tex.ArrayCount = tex.Depth;
             int surfaceCount = tex.MipCount * tex.ArrayCount;
+            int decodeCount = Math.Clamp(surfaces, 0, surfaceCount);
 
             reader.BaseStream.Seek(headerSize, SeekOrigin.Begin);
 
@@ -201,16 +209,19 @@ namespace ShaderLibrary.CompileTool
                 reader.ReadUInt32(); // always 6
             }
 
+            if (decodeCount == 0)
+                return tex;
+
             using var decompressor = new ZstdNet.Decompressor();
 
-            for (int i = 0; i < surfaceCount; i++)
+            for (int i = 0; i < decodeCount; i++)
             {
                 byte[] compressed = reader.ReadBytes((int)headers[i].Size);
                 byte[] raw = decompressor.Unwrap(compressed);
 
                 int mipWidth = Math.Max(1, tex.Width >> headers[i].MipLevel);
                 int mipHeight = Math.Max(1, tex.Height >> headers[i].MipLevel);
-                byte[] deswizzled = TegraX1Deswizzle.Deswizzle(raw, format, tex.Height, mipWidth, mipHeight);
+                byte[] deswizzled = TegraX1Deswizzle.Deswizzle(raw, tex.Format, tex.Height, mipWidth, mipHeight);
 
                 tex.Surfaces.Add(new TxtgSurface
                 {

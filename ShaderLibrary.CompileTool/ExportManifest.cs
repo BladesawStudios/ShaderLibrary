@@ -406,7 +406,7 @@ namespace ShaderLibrary.CompileTool
                 {
                     try
                     {
-                        var t = TxtgTexture.Load(txtg);
+                        var t = TxtgTexture.Load(txtg, surfaces: 0);
                         w = (int)t.Width; h = (int)t.Height; fmt = t.Format.ToString();
                         file = $"{texName}_{w}x{h}_{fmt}.bin";
                         compSelectField = $", \"comp_select\": [{string.Join(", ", t.CompSelect)}]";

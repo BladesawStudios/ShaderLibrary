@@ -177,7 +177,7 @@ namespace ShaderLibrary.CompileTool
                 return;
             }
 
-            var tex = TxtgTexture.Load(path);
+            var tex = TxtgTexture.Load(path, surfaces: 1);
             if (tex.Format != TxtgFormat.BC5_UNORM)
             {
                 Console.WriteLine($"[SystemTextures] '{textureName}' is {tex.Format}, expected BC5_UNORM - skipping.");
@@ -290,7 +290,7 @@ namespace ShaderLibrary.CompileTool
 
                 scanned++;
                 TxtgTexture tex;
-                try { tex = TxtgTexture.Load(path); }
+                try { tex = TxtgTexture.Load(path, surfaces: 1); }
                 catch { continue; }
                 if (tex.Surfaces.Count == 0)
                     continue;
@@ -331,7 +331,7 @@ namespace ShaderLibrary.CompileTool
                 return;
             }
 
-            var tex = TxtgTexture.Load(path);
+            var tex = TxtgTexture.Load(path, surfaces: 1);
             if (tex.Format != TxtgFormat.BC4_UNORM)
             {
                 Console.WriteLine($"[SystemTextures] '{textureName}' is {tex.Format}, expected BC4_UNORM - skipping.");

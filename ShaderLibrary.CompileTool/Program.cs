@@ -55,6 +55,16 @@ namespace ShaderLibrary.CompilerTool
             // straight into Marrow's own cache. Steps 2 and 3 (material UBOs, manifest + shader
             // decompile) depend on the material archive, not on the skeleton, so re-running them
             // after a skeleton/anim export fix is pure wasted minutes.
+            // "--probe-bfsha <archive> [outDir] [program...]" - see ProbeBfsha.
+            if (args.Contains("--probe-bfsha"))
+            {
+                string archive = positional.Length > 1 ? positional[1] : "terrain";
+                string? probeOut = positional.Length > 2 ? positional[2] : null;
+                int[] programs = positional.Skip(3).Select(int.Parse).ToArray();
+                ProbeBfsha.Run(romfsRoot, archive, probeOut, programs);
+                return;
+            }
+
             if (args.Contains("--reexport-geometry"))
             {
                 string actorOrModel = positional.Length > 1 ? positional[1] : "Animal_Bass";

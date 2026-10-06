@@ -315,6 +315,9 @@ namespace ShaderLibrary.CompileTool
         /// remarks for the real baking formula, reverse engineered via Ghidra
         /// (nn::g3d2::MaterialObj's per-kind TexSrt callback table).
         /// </summary>
+        /// <summary>A material's <c>gsys_material</c> bytes for <paramref name="block"/> - any shading model's.</summary>
+        public static byte[] BuildMaterialBlock(BfshaUniformBlock block, Material mat) => BuildBlock(block, mat, out _, out _, out _);
+
         static byte[] BuildBlock(BfshaUniformBlock block, Material mat,
                                  out int matched, out int missing, out List<string> missingNames)
         {

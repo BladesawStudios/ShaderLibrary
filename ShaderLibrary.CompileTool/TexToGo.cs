@@ -56,6 +56,50 @@ namespace ShaderLibrary.CompileTool
             return LoadBntx(path, surfaces);
         }
 
+        /// <summary>
+        /// Every array slice of a texture, mip 0 of each, in slice order - for the few textures a
+        /// program reads as an array (the terrain water's per-water-type normals and colour table).
+        /// </summary>
+        public static TxtgTexture LoadAllSlices(string path)
+        {
+            if (path.EndsWith(".txtg", StringComparison.OrdinalIgnoreCase))
+            {
+                var header = TxtgTexture.Load(path, surfaces: 0);
+                var tex = TxtgTexture.Load(path, surfaces: Math.Max(1, header.ArrayCount));
+                tex.Surfaces.RemoveAll(s => s.MipLevel != 0);
+                return tex;
+            }
+            byte[] raw = File.ReadAllBytes(path);
+            byte[] data = TotkCommon.Zstd.IsCompressed(raw) ? TotkCommon.Totk.Zstd.Decompress(raw) : raw;
+            using var ms = new MemoryStream(data);
+            Texture source = new BntxFile(ms).Textures[0];
+            TxtgFormat format = MapFormat(source.Format)
+                ?? throw new NotSupportedException($"BNTX format {source.Format} (0x{(uint)source.Format:X}) has no TXTG equivalent here");
+            var result = new TxtgTexture
+            {
+                Width = (int)source.Width,
+                Height = (int)source.Height,
+                Depth = 1,
+                MipCount = 1,
+                ArrayCount = source.TextureData.Count,
+                Format = format,
+            };
+            for (int slice = 0; slice < source.TextureData.Count; slice++)
+            {
+                byte[] swizzled = source.TextureData[slice][0];
+                int padded = TegraX1Deswizzle.PaddedSize(format, result.Height, result.Width, result.Height);
+                if (swizzled.Length < padded)
+                    Array.Resize(ref swizzled, padded);
+                result.Surfaces.Add(new TxtgSurface
+                {
+                    ArrayLevel = slice,
+                    MipLevel = 0,
+                    Data = TegraX1Deswizzle.Deswizzle(swizzled, format, result.Height, result.Width, result.Height),
+                });
+            }
+            return result;
+        }
+
         static TxtgTexture LoadBntx(string path, int surfaces)
         {
             byte[] raw = File.ReadAllBytes(path);
@@ -64,7 +108,7 @@ namespace ShaderLibrary.CompileTool
             Texture source = new BntxFile(ms).Textures[0];
 
             TxtgFormat format = MapFormat(source.Format)
-                ?? throw new NotSupportedException($"BNTX format {source.Format} has no TXTG equivalent here");
+                ?? throw new NotSupportedException($"BNTX format {source.Format} (0x{(uint)source.Format:X}) has no TXTG equivalent here");
 
             var tex = new TxtgTexture
             {
@@ -90,7 +134,24 @@ namespace ShaderLibrary.CompileTool
             return tex;
         }
 
-        static TxtgFormat? MapFormat(SurfaceFormat format) => format switch
+        // By the format's raw code first: Syroot's enum names predate some of the codes TotK uses
+        // and call them something else entirely (WaterAlb's RGBA8 reads as D32_FLOAT_S8X24_UINT).
+        static TxtgFormat? MapFormat(SurfaceFormat format) => (uint)format switch
+        {
+            0x0B01 => TxtgFormat.R8G8B8A8_UNORM,
+            // Named D32_FLOAT_S8X24_UINT by both Syroot and BntxSharp, but WaterAlb's texels under
+            // this code are plainly four half floats - colours with alpha 1.0.
+            0x1505 => TxtgFormat.R16G16B16A16_FLOAT,
+            0x0B06 => TxtgFormat.R8G8B8A8_SRGB,
+            0x3301 => TxtgFormat.ASTC_8x6_UNORM,
+            0x3306 => TxtgFormat.ASTC_8x6_SRGB,
+            0x3201 => TxtgFormat.ASTC_8x5_UNORM,
+            0x3101 => TxtgFormat.ASTC_6x6_UNORM,
+            0x2F01 => TxtgFormat.ASTC_5x5_UNORM,
+            _ => MapFormatByName(format),
+        };
+
+        static TxtgFormat? MapFormatByName(SurfaceFormat format) => format switch
         {
             SurfaceFormat.BC1_UNORM => TxtgFormat.BC1_UNORM,
             SurfaceFormat.BC1_SRGB => TxtgFormat.BC1_UNORM_SRGB,
@@ -102,6 +163,13 @@ namespace ShaderLibrary.CompileTool
             SurfaceFormat.ASTC_4x4_SRGB => TxtgFormat.ASTC_4x4_SRGB,
             SurfaceFormat.ASTC_8x8_UNORM => TxtgFormat.ASTC_8x8_UNORM,
             SurfaceFormat.ASTC_8x8_SRGB => TxtgFormat.ASTC_8x8_SRGB,
+            SurfaceFormat.ASTC_8x6_UNORM => TxtgFormat.ASTC_8x6_UNORM,
+            SurfaceFormat.ASTC_8x6_SRGB => TxtgFormat.ASTC_8x6_SRGB,
+            SurfaceFormat.ASTC_8x5_UNORM => TxtgFormat.ASTC_8x5_UNORM,
+            SurfaceFormat.ASTC_6x6_UNORM => TxtgFormat.ASTC_6x6_UNORM,
+            SurfaceFormat.ASTC_5x5_UNORM => TxtgFormat.ASTC_5x5_UNORM,
+            SurfaceFormat.R8_G8_B8_A8_UNORM => TxtgFormat.R8G8B8A8_UNORM,
+            SurfaceFormat.R8_G8_B8_A8_SRGB => TxtgFormat.R8G8B8A8_SRGB,
             _ => null,
         };
 

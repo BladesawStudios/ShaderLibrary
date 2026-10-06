@@ -42,6 +42,14 @@ namespace ShaderLibrary.CompileTool
         ASTC_4x4_SRGB,
         ASTC_8x8_UNORM,
         ASTC_8x8_SRGB,
+        ASTC_8x6_UNORM,
+        ASTC_8x6_SRGB,
+        ASTC_8x5_UNORM,
+        ASTC_6x6_UNORM,
+        ASTC_5x5_UNORM,
+        R8G8B8A8_UNORM,
+        R8G8B8A8_SRGB,
+        R16G16B16A16_FLOAT,
     }
 
     public class TxtgSurface
@@ -120,6 +128,14 @@ namespace ShaderLibrary.CompileTool
             TxtgFormat.ASTC_4x4_SRGB => (16, 4, 4),
             TxtgFormat.ASTC_8x8_UNORM => (16, 8, 8),
             TxtgFormat.ASTC_8x8_SRGB => (16, 8, 8),
+            TxtgFormat.ASTC_8x6_UNORM => (16, 8, 6),
+            TxtgFormat.ASTC_8x6_SRGB => (16, 8, 6),
+            TxtgFormat.ASTC_8x5_UNORM => (16, 8, 5),
+            TxtgFormat.ASTC_6x6_UNORM => (16, 6, 6),
+            TxtgFormat.ASTC_5x5_UNORM => (16, 5, 5),
+            TxtgFormat.R8G8B8A8_UNORM => (4, 1, 1),
+            TxtgFormat.R8G8B8A8_SRGB => (4, 1, 1),
+            TxtgFormat.R16G16B16A16_FLOAT => (8, 1, 1),
             _ => throw new NotSupportedException($"Unhandled TxtgFormat {format}"),
         };
 

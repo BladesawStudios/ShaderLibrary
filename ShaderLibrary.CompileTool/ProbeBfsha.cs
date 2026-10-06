@@ -51,6 +51,22 @@ namespace ShaderLibrary.CompileTool
                 foreach (int p in programs.Where(p => p >= 0 && p < sm.Programs.Count))
                 {
                     sm.DumpProgramChoices(p, Path.Combine(outDir, $"{archive}_{name}_prog{p}_options.txt"));
+                    using (var w = new StreamWriter(Path.Combine(outDir, $"{archive}_{name}_prog{p}_bindings.txt")))
+                    {
+                        var prog = sm.Programs[p];
+                        for (int i = 0; i < sm.Samplers.Count && i < prog.SamplerIndices.Count; i++)
+                        {
+                            var loc = prog.SamplerIndices[i];
+                            if (loc.VertexLocation >= 0 || loc.FragmentLocation >= 0)
+                                w.WriteLine($"sampler {sm.Samplers.GetKey(i)} vertex={loc.VertexLocation} fragment={loc.FragmentLocation}");
+                        }
+                        for (int i = 0; i < sm.UniformBlocks.Count && i < prog.UniformBlockIndices.Count; i++)
+                        {
+                            var loc = prog.UniformBlockIndices[i];
+                            if (loc.VertexLocation >= 0 || loc.FragmentLocation >= 0)
+                                w.WriteLine($"block {sm.UniformBlocks.GetKey(i)} vertex={loc.VertexLocation} fragment={loc.FragmentLocation}");
+                        }
+                    }
                     var bin = sm.GetVariation(p).BinaryProgram;
                     foreach (var (code, reflect, ext) in new[] { (bin.VertexShader, bin.VertexShaderReflection, "vert"), (bin.FragmentShader, bin.FragmentShaderReflection, "frag") })
                     {

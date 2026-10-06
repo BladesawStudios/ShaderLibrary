@@ -82,7 +82,7 @@ namespace ShaderLibrary.CompileTool
         {
             ["0"] = "chara_nonmetal", ["1"] = "chara_metal", ["10"] = "chara_grossy",
             ["100"] = "chara_hair", ["101"] = "chara_skin", ["104"] = "chara_eye",
-            ["105"] = "field_leaf", ["103"] = "field_water", ["2"] = "field_hybrid",
+            ["105"] = "field_leaf", ["103"] = "field_water", ["2"] = "field_hybrid", ["102"] = "field_miasma",
         };
 
         public static void Run(string romfsRoot, string bfshaPath, string modelName, string outDir,

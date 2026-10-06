@@ -451,12 +451,12 @@ namespace ShaderLibrary.CompileTool
                 string file = "", fmt = "";
                 int w = 0, h = 0;
                 string compSelectField = "";
-                string txtg = RomfsOverlay.Resolve(romfsRoot, "TexToGo", texName + ".txtg");
-                if (File.Exists(txtg))
+                string? txtg = TexToGo.Find(romfsRoot, texName);
+                if (txtg is not null)
                 {
                     try
                     {
-                        var t = TxtgTexture.Load(txtg, surfaces: 0);
+                        var t = TexToGo.Load(txtg, surfaces: 0);
                         w = (int)t.Width; h = (int)t.Height; fmt = t.Format.ToString();
                         file = $"{texName}_{w}x{h}_{fmt}.bin";
                         compSelectField = $", \"comp_select\": [{string.Join(", ", t.CompSelect)}]";

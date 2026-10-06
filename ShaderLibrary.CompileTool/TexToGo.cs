@@ -1,0 +1,100 @@
+using System;
+using System.IO;
+using Syroot.NintenTools.NSW.Bntx;
+using Syroot.NintenTools.NSW.Bntx.GFX;
+
+namespace ShaderLibrary.CompileTool
+{
+    /// <summary>
+    /// Finds a material texture in <c>TexToGo/</c> by name, whichever container it ships in.
+    /// </summary>
+    /// <remarks>
+    /// Nearly every texture is TotK's own <c>.txtg</c>, but 216 ship as a plain zstd-compressed
+    /// <c>.bntx</c> - among them <c>CmnTex_BakeDefault</c>, the baked-lighting texture every static
+    /// world object samples as <c>bake0</c> when no area bake overrides it. Looking only for
+    /// <c>.txtg</c> left that binding unresolved on thousands of shapes, the renderer bound nothing,
+    /// and baked light times whatever happened to be on that unit came out black. A <c>.bntx</c> is
+    /// read into the same <see cref="TxtgTexture"/> the rest of preparation already handles.
+    /// </remarks>
+    public static class TexToGo
+    {
+        /// <summary>The texture's file, through the mod overlay - <c>.txtg</c> first, then <c>.bntx.zs</c>/<c>.bntx</c> - or null when there is none.</summary>
+        public static string? Find(string romfsRoot, string name)
+        {
+            foreach (string extension in new[] { ".txtg", ".bntx.zs", ".bntx" })
+            {
+                string path = RomfsOverlay.Resolve(romfsRoot, "TexToGo", name + extension);
+                if (File.Exists(path))
+                    return path;
+            }
+            return null;
+        }
+
+        /// <summary>Loads a file <see cref="Find"/> returned. <paramref name="surfaces"/> as on <see cref="TxtgTexture.Load(string, int)"/>.</summary>
+        public static TxtgTexture Load(string path, int surfaces = int.MaxValue)
+        {
+            if (path.EndsWith(".txtg", StringComparison.OrdinalIgnoreCase))
+                return TxtgTexture.Load(path, surfaces);
+            return LoadBntx(path, surfaces);
+        }
+
+        static TxtgTexture LoadBntx(string path, int surfaces)
+        {
+            byte[] raw = File.ReadAllBytes(path);
+            byte[] data = TotkCommon.Zstd.IsCompressed(raw) ? TotkCommon.Totk.Zstd.Decompress(raw) : raw;
+            using var ms = new MemoryStream(data);
+            Texture source = new BntxFile(ms).Textures[0];
+
+            TxtgFormat format = MapFormat(source.Format)
+                ?? throw new NotSupportedException($"BNTX format {source.Format} has no TXTG equivalent here");
+
+            var tex = new TxtgTexture
+            {
+                Width = (int)source.Width,
+                Height = (int)source.Height,
+                Depth = 1,
+                MipCount = 1,
+                ArrayCount = 1,
+                Format = format,
+                CompSelect = [Channel(source.ChannelRed, 0), Channel(source.ChannelGreen, 1), Channel(source.ChannelBlue, 2), Channel(source.ChannelAlpha, 3)],
+            };
+            if (surfaces <= 0)
+                return tex;
+
+            // TextureData is [array slice][mip]; preparation only ever uses the first.
+            byte[] swizzled = source.TextureData[0][0];
+            tex.Surfaces.Add(new TxtgSurface
+            {
+                ArrayLevel = 0,
+                MipLevel = 0,
+                Data = TegraX1Deswizzle.Deswizzle(swizzled, format, tex.Height, tex.Width, tex.Height),
+            });
+            return tex;
+        }
+
+        static TxtgFormat? MapFormat(SurfaceFormat format) => format switch
+        {
+            SurfaceFormat.BC1_UNORM => TxtgFormat.BC1_UNORM,
+            SurfaceFormat.BC1_SRGB => TxtgFormat.BC1_UNORM_SRGB,
+            SurfaceFormat.BC3_SRGB => TxtgFormat.BC3_UNORM_SRGB,
+            SurfaceFormat.BC4_UNORM => TxtgFormat.BC4_UNORM,
+            SurfaceFormat.BC5_UNORM => TxtgFormat.BC5_UNORM,
+            SurfaceFormat.BC7_UNORM => TxtgFormat.BC7_UNORM,
+            SurfaceFormat.ASTC_4x4_UNORM => TxtgFormat.ASTC_4x4_UNORM,
+            SurfaceFormat.ASTC_4x4_SRGB => TxtgFormat.ASTC_4x4_SRGB,
+            SurfaceFormat.ASTC_8x8_UNORM => TxtgFormat.ASTC_8x8_UNORM,
+            SurfaceFormat.ASTC_8x8_SRGB => TxtgFormat.ASTC_8x8_SRGB,
+            _ => null,
+        };
+
+        /// <summary>A BNTX channel source as a TXTG component index; a constant zero/one keeps the channel's own.</summary>
+        static byte Channel(ChannelType type, byte own) => type switch
+        {
+            ChannelType.Red => 0,
+            ChannelType.Green => 1,
+            ChannelType.Blue => 2,
+            ChannelType.Alpha => 3,
+            _ => own,
+        };
+    }
+}

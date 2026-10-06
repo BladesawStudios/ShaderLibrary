@@ -733,10 +733,10 @@ namespace ShaderLibrary.CompileTool
             {
                 // Through the overlay: a texture-replacement mod wins here even when the model
                 // itself came from the base dump.
-                string txtgPath = RomfsOverlay.Resolve(romfsRoot, "TexToGo", tname + ".txtg");
-                if (!File.Exists(txtgPath))
+                string? txtgPath = TexToGo.Find(romfsRoot, tname);
+                if (txtgPath is null)
                 {
-                    Console.WriteLine($"[ExportTestBench] Texture not found: {txtgPath}");
+                    Console.WriteLine($"[ExportTestBench] Texture not found: TexToGo/{tname}");
                     continue;
                 }
                 // One texture in an unsupported format must not abort the whole model. The
@@ -744,7 +744,7 @@ namespace ShaderLibrary.CompileTool
                 // which costs one texture rather than every shape.
                 try
                 {
-                    var tex = TxtgTexture.Load(txtgPath, surfaces: 1);
+                    var tex = TexToGo.Load(txtgPath, surfaces: 1);
                     if (Environment.GetEnvironmentVariable("MC_DEBUG_COMPSELECT") == "1")
                         Console.WriteLine($"[CompSelect] {tname} ({tex.Format}): R={tex.CompSelect[0]} G={tex.CompSelect[1]} B={tex.CompSelect[2]} A={tex.CompSelect[3]}");
                     var surf = tex.Surfaces[0];

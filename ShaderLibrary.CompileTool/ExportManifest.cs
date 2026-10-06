@@ -206,6 +206,18 @@ namespace ShaderLibrary.CompileTool
                 sb.AppendLine($"      \"vertex_file\": \"{safe}_vtx.bin\",");
                 sb.AppendLine($"      \"index_file\": \"{safe}_idx.bin\",");
                 sb.AppendLine($"      \"index_count\": {idxCount},");
+                // Every level of detail in the index file, finest first, as [first index, count] -
+                // see ExportTestBench, which appends them after LOD 0 in this order.
+                {
+                    var lods = new List<string>();
+                    long first = 0;
+                    foreach (var lodMesh in shape.Meshes)
+                    {
+                        lods.Add($"[{first}, {lodMesh.IndexCount}]");
+                        first += lodMesh.IndexCount;
+                    }
+                    sb.AppendLine($"      \"lods\": [{string.Join(", ", lods)}],");
+                }
                 // Which space this shape's positions were authored in: 0 = rigid (bone space,
                 // Shape.BoneIndex), 1 = single-bind (bone space, per-vertex _i0), >=2 = smooth
                 // (already model space). The exporter bakes the bone matrix for 0 and 1.

@@ -676,6 +676,19 @@ namespace ShaderLibrary.CompileTool
                 {
                     foreach (uint idx in indices)
                         bw.Write((uint)idx);
+
+                    // The coarser levels of detail follow, finest first, so a loader that draws
+                    // index_count from the start still draws exactly LOD 0. Every level indexes
+                    // the same vertex buffer, each from its own FirstVertex; re-based on LOD 0's
+                    // so the levels read the buffer the way LOD 0 already does. ExportManifest
+                    // writes where each one starts ("lods").
+                    for (int l = 1; l < shape.Meshes.Count; l++)
+                    {
+                        var lod = shape.Meshes[l];
+                        long rebase = (long)lod.FirstVertex - mesh.FirstVertex;
+                        foreach (uint idx in lod.GetIndices())
+                            bw.Write((uint)(idx + rebase));
+                    }
                 }
 
                 // Shape UBO (128 bytes)

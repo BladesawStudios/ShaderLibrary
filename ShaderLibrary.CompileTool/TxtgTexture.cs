@@ -221,6 +221,13 @@ namespace ShaderLibrary.CompileTool
 
                 int mipWidth = Math.Max(1, tex.Width >> headers[i].MipLevel);
                 int mipHeight = Math.Max(1, tex.Height >> headers[i].MipLevel);
+                // Surfaces are stored trimmed of their trailing block-linear padding - most by a few
+                // hundred bytes, a tail mip to a fraction of the one 512-byte GOB it still occupies -
+                // and the native deswizzle panics, taking the process with it, when handed less than
+                // the whole padded surface. The missing bytes are padding no texel lives in.
+                int padded = TegraX1Deswizzle.PaddedSize(tex.Format, tex.Height, mipWidth, mipHeight);
+                if (raw.Length < padded)
+                    Array.Resize(ref raw, padded);
                 byte[] deswizzled = TegraX1Deswizzle.Deswizzle(raw, tex.Format, tex.Height, mipWidth, mipHeight);
 
                 tex.Surfaces.Add(new TxtgSurface
@@ -270,6 +277,19 @@ namespace ShaderLibrary.CompileTool
         /// height) silently produces a wrong-but-plausible-looking deswizzle for every mip except
         /// mip 0.
         /// </summary>
+        /// <summary>The size of a mip's whole block-linear surface, padding included - what the native deswizzle reads.</summary>
+        public static int PaddedSize(TxtgFormat format, int fullTextureHeight, int mipWidth, int mipHeight)
+        {
+            var (bpp, blockW, blockH) = TxtgTexture.GetFormatInfo(format);
+            uint widthInBlocks = DivRoundUp((uint)mipWidth, blockW);
+            uint heightInBlocks = DivRoundUp((uint)mipHeight, blockH);
+            ulong blockHeight = MipBlockHeight(heightInBlocks, BlockHeightMip0(DivRoundUp((uint)fullTextureHeight, blockH)));
+            // A GOB is 64 bytes by 8 rows; a block is blockHeight GOBs stacked.
+            ulong gobsWide = (widthInBlocks * (ulong)bpp + 63) / 64;
+            ulong blocksHigh = (heightInBlocks + 8 * blockHeight - 1) / (8 * blockHeight);
+            return (int)(gobsWide * blocksHigh * blockHeight * 512);
+        }
+
         public static byte[] Deswizzle(byte[] swizzledData, TxtgFormat format, int fullTextureHeight, int mipWidth, int mipHeight)
         {
             var (bpp, blockW, blockH) = TxtgTexture.GetFormatInfo(format);

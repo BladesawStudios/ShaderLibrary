@@ -744,13 +744,10 @@ namespace ShaderLibrary.CompileTool
                 // which costs one texture rather than every shape.
                 try
                 {
-                    var tex = TexToGo.Load(txtgPath, surfaces: 1);
+                    var (tex, outTex) = TexToGo.ExportMipChain(txtgPath, tname, outDir);
                     if (Environment.GetEnvironmentVariable("MC_DEBUG_COMPSELECT") == "1")
                         Console.WriteLine($"[CompSelect] {tname} ({tex.Format}): R={tex.CompSelect[0]} G={tex.CompSelect[1]} B={tex.CompSelect[2]} A={tex.CompSelect[3]}");
-                    var surf = tex.Surfaces[0];
-                    string outTex = Path.Combine(outDir, $"{tname}_{tex.Width}x{tex.Height}_{tex.Format}.bin");
-                    File.WriteAllBytes(outTex, surf.Data);
-                    Console.WriteLine($"[ExportTestBench] Exported texture {tname}: {tex.Width}x{tex.Height} {tex.Format} -> {outTex} ({surf.Data.Length} bytes)");
+                    Console.WriteLine($"[ExportTestBench] Exported texture {tname}: {tex.Width}x{tex.Height} {tex.Format}, {tex.Surfaces.Count} mip(s) -> {outTex}");
                 }
                 catch (Exception ex)
                 {

@@ -30,6 +30,24 @@ namespace ShaderLibrary.CompileTool
             return null;
         }
 
+        /// <summary>
+        /// Writes the texture's whole mip chain back to back to <c>&lt;outDir&gt;/&lt;name&gt;_&lt;w&gt;x&lt;h&gt;_&lt;format&gt;.bin</c>
+        /// and returns the texture (its header, and the surfaces written). For a plain 2D texture
+        /// its surfaces in file order are exactly mip 0, 1, 2... - a texture drawn without its chain
+        /// shimmers into moire at a distance. Arrays keep layer 0's mip 0 only: their surfaces run
+        /// every layer's mip 0 first, and nothing binds one as a 2D texture past its first layer.
+        /// </summary>
+        public static (TxtgTexture Texture, string File) ExportMipChain(string path, string name, string outDir)
+        {
+            var header = Load(path, surfaces: 0);
+            var tex = Load(path, surfaces: header.ArrayCount <= 1 ? header.MipCount : 1);
+            string file = $"{name}_{tex.Width}x{tex.Height}_{tex.Format}.bin";
+            using (var outStream = File.Create(Path.Combine(outDir, file)))
+                foreach (var surf in tex.Surfaces)
+                    outStream.Write(surf.Data);
+            return (tex, file);
+        }
+
         /// <summary>Loads a file <see cref="Find"/> returned. <paramref name="surfaces"/> as on <see cref="TxtgTexture.Load(string, int)"/>.</summary>
         public static TxtgTexture Load(string path, int surfaces = int.MaxValue)
         {

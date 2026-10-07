@@ -46,7 +46,25 @@ namespace ShaderLibrary.CompileTool
             var sarc = Sarc.FromBinary(new ArraySegment<byte>(decompressed));
             var entryNames = sarc.Select(kv => kv.Key).ToList();
 
-            string? modelInfoKey = entryNames.FirstOrDefault(k => k.StartsWith("Component/ModelInfo/", StringComparison.Ordinal));
+            // A pack can hold several ModelInfo files - an armour piece's leggings pack carries its own and the
+            // helmet's - so the one to read is the one the actor's ActorParam points at (ModelInfoRef, possibly
+            // inherited), not whichever sorts first. Fields a file lacks come from its $parent.
+            var entries = entryNames.ToHashSet(StringComparer.Ordinal);
+            string? modelInfoKey = null;
+            foreach (var actorParam in ParentChain(sarc, entries, $"Actor/{actorName}.engine__actor__ActorParam.bgyml"))
+            {
+                if (actorParam.TryGetValue("Components", out var components) && components.Type == BymlNodeType.Map
+                    && components.GetMap().TryGetValue("ModelInfoRef", out var reference) && reference.Type == BymlNodeType.String
+                    && reference.GetString().Length > 0)
+                {
+                    modelInfoKey = EntryName(reference.GetString());
+                    break;
+                }
+            }
+            string named = $"Component/ModelInfo/{actorName}.engine__component__ModelInfo.bgyml";
+            if (modelInfoKey == null || !entries.Contains(modelInfoKey))
+                modelInfoKey = entries.Contains(named) ? named
+                    : entryNames.FirstOrDefault(k => k.StartsWith("Component/ModelInfo/", StringComparison.Ordinal));
             if (modelInfoKey == null)
             {
                 Console.WriteLine($"[ActorInfo] '{actorName}' has a pack but no Component/ModelInfo - can't resolve a model from it.");
@@ -59,9 +77,14 @@ namespace ShaderLibrary.CompileTool
             // other, narrower schema this class doesn't need), so indexing those keys unconditionally
             // threw a raw KeyNotFoundException straight out of this method instead of the same clean
             // "nothing to resolve" null the missing-modelInfoKey case just above already returns.
-            var modelInfo = Byml.FromBinary(sarc[modelInfoKey].ToArray()).GetMap();
-            if (!modelInfo.TryGetValue("ModelProjectName", out var modelProjectNameNode) ||
-                !modelInfo.TryGetValue("FmdbName", out var fmdbNameNode))
+            var modelInfoChain = ParentChain(sarc, entries, modelInfoKey);
+            Byml? modelProjectNameNode = null, fmdbNameNode = null;
+            foreach (var file in modelInfoChain)
+            {
+                if (modelProjectNameNode == null && file.TryGetValue("ModelProjectName", out var project)) modelProjectNameNode = project;
+                if (fmdbNameNode == null && file.TryGetValue("FmdbName", out var fmdb)) fmdbNameNode = fmdb;
+            }
+            if (modelProjectNameNode == null || fmdbNameNode == null)
             {
                 Console.WriteLine($"[ActorInfo] '{actorName}' has a Component/ModelInfo but no ModelProjectName/FmdbName in it - not a real model.");
                 return null;
@@ -88,6 +111,33 @@ namespace ShaderLibrary.CompileTool
 
             Console.WriteLine($"[ActorInfo] '{actorName}' -> model '{modelName}', anim archives: [{string.Join(", ", animPackNames)}]");
             return new Resolved(modelName, animPackNames);
+        }
+
+        /// <summary>A parameter file and the ones its <c>$parent</c> names in turn, as far as the pack holds them.</summary>
+        private static List<IDictionary<string, Byml>> ParentChain(Sarc sarc, HashSet<string> entries, string name)
+        {
+            var chain = new List<IDictionary<string, Byml>>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            string? at = name;
+            while (at != null && seen.Add(at) && entries.Contains(at))
+            {
+                IDictionary<string, Byml> file;
+                try { file = Byml.FromBinary(sarc[at].ToArray()).GetMap(); }
+                catch { break; }
+                chain.Add(file);
+                at = file.TryGetValue("$parent", out var parent) && parent.Type == BymlNodeType.String && parent.GetString().Length > 0
+                    ? EntryName(parent.GetString()) : null;
+            }
+            return chain;
+        }
+
+        /// <summary>A reference as a pack entry name: <c>?Component/X.bgyml</c> is the entry itself, and the authoring path <c>Work/Component/X.gyml</c> is the same file compiled.</summary>
+        private static string EntryName(string reference)
+        {
+            string name = reference.TrimStart('?');
+            if (name.StartsWith("Work/", StringComparison.Ordinal)) name = name.Substring("Work/".Length);
+            if (name.EndsWith(".gyml", StringComparison.Ordinal)) name = name.Substring(0, name.Length - ".gyml".Length) + ".bgyml";
+            return name;
         }
     }
 }

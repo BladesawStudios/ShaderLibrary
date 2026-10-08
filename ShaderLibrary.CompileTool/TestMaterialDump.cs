@@ -23,14 +23,7 @@ namespace ShaderLibrary.CompileTool
     /// that version's ShaderParam names all came back empty despite the raw ShaderParamData
     /// bytes being present (see git history for that attempt if curious).
     ///
-    /// The genuine, complete container spec lives in a proper reference implementation (its own
-    /// source, particularly src/mc_MeshCodec.h's ResMeshCodecPackageHeader and
-    /// src/mc_MeshCodec.cpp's DecompressMC, is the authoritative spec - not this comment). Rather
-    /// than re-port that C++ (bitpacked vertex/index decode included) into C#, this shells out to
-    /// that project's own working CLI tool's prebuilt binary, vendored into this repo at
-    /// vendor/MeshCodec/meshcodec_cli.exe, to do the real, complete decompression, then loads the
-    /// resulting byte-perfect .bfres normally. See MeshCodecCliPath below for how that tool is
-    /// located.
+    /// McSharp does the real, complete decompression, and the resulting byte-perfect .bfres loads normally.
     ///
     /// See BfresLibraryPatches.cs for two BfresLibrary.dll bugs patched at runtime to reach
     /// Model/Material objects without crashing (unrelated to the container format - those bugs
@@ -38,84 +31,14 @@ namespace ShaderLibrary.CompileTool
     /// </summary>
     public static class TestMaterialDump
     {
-        /// <summary>
-        /// Path to MeshCodec's built CLI decompressor (see class remarks - this repo is the
-        /// authoritative decoder, not reimplemented here). Vendored as a prebuilt binary at
-        /// vendor/MeshCodec/meshcodec_cli.exe, resolved relative to THIS source file's own
-        /// location (via <c>[CallerFilePath]</c>) rather than a hardcoded absolute path, so it
-        /// works from a fresh checkout on any machine regardless of where the repo lives.
-        ///
-        /// To rebuild it from MeshCodec's own source (github.com/M-Mods/MeshCodec or wherever it
-        /// was sourced from):
-        ///   (initialize the lib/zstd submodule first: git submodule update --init --recursive)
-        ///   cmake -B build -G Ninja -DCMAKE_MAKE_PROGRAM=&lt;path to VS's bundled ninja.exe&gt; ...
-        ///   cmake --build build --config Release
-        /// (devkitPro's own MSYS2-flavored cmake/ninja pair generates GCC-style flags that
-        /// MSVC's cl.exe rejects - use Visual Studio's own bundled cmake+ninja, found under
-        /// its install path at Common7\IDE\CommonExtensions\Microsoft\CMake\{CMake,Ninja}\,
-        /// invoked from an x64 Developer environment (vcvars64.bat) so cl.exe resolves), then copy
-        /// the resulting tests/meshcodec_cli.exe over vendor/MeshCodec/meshcodec_cli.exe.
-        /// Override via the MESHCODEC_CLI environment variable to point at a different build.
-        /// </summary>
-        static string MeshCodecCliPath =>
-            Environment.GetEnvironmentVariable("MESHCODEC_CLI")
-            ?? Path.Combine(RepoVendorDir(), "MeshCodec", "meshcodec_cli.exe");
-
-        /// <summary>
-        /// This file lives at vendor/ShaderLibrary/ShaderLibrary.CompileTool/TestMaterialDump.cs,
-        /// so its own directory's great-grandparent is the repo's vendor/ folder - resolved from
-        /// the SOURCE file's compile-time location (stable across machines/checkouts), not the
-        /// build output directory (which varies by configuration/TFM).
-        /// </summary>
-        static string RepoVendorDir([System.Runtime.CompilerServices.CallerFilePath] string sourceFile = "") =>
-            Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourceFile)!, "..", ".."));
-
-        /// <summary>
-        /// Decompresses a romfs "*.bfres.mc" (MCPK-wrapped) file into a raw BFRES byte array
-        /// by shelling out to MeshCodec's real CLI decoder (see class remarks).
-        /// </summary>
+        /// <summary>Decompresses a romfs "*.bfres.mc" (MCPK-wrapped) file into a raw BFRES byte array with McSharp.</summary>
         public static byte[] DecompressBfresMc(string mcPath)
         {
-            string cli = MeshCodecCliPath;
-            if (!File.Exists(cli))
-                throw new FileNotFoundException(
-                    $"meshcodec_cli.exe not found at '{cli}' - build it first (see MeshCodecCliPath's remarks), " +
-                    "or set the MESHCODEC_CLI environment variable to its path.", cli);
-
-            string outDir = Path.Combine(Path.GetTempPath(), "mc_decomp_" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(outDir);
-            try
-            {
-                var psi = new ProcessStartInfo(cli, $"\"{mcPath}\" \"{outDir}\"")
-                {
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                };
-                using var proc = Process.Start(psi)
-                    ?? throw new InvalidOperationException($"Failed to start {cli}");
-                string stdout = proc.StandardOutput.ReadToEnd();
-                string stderr = proc.StandardError.ReadToEnd();
-                proc.WaitForExit();
-
-                // meshcodec_cli writes <outDir>/<stem of input, no .mc> - e.g.
-                // "Foo.bfres.mc" -> "<outDir>/Foo.bfres".
-                string expected = Path.Combine(outDir, Path.GetFileNameWithoutExtension(mcPath));
-                if (proc.ExitCode != 0 || !File.Exists(expected))
-                {
-                    throw new InvalidDataException(
-                        $"meshcodec_cli failed on {mcPath} (exit {proc.ExitCode}).\nstdout: {stdout}\nstderr: {stderr}");
-                }
-
-                byte[] fres = File.ReadAllBytes(expected);
-                if (fres.Length < 4 || fres[0] != 'F' || fres[1] != 'R' || fres[2] != 'E' || fres[3] != 'S')
-                    throw new InvalidDataException($"{mcPath}: decompressed data does not start with 'FRES' - unexpected output from meshcodec_cli");
-                return fres;
-            }
-            finally
-            {
-                try { Directory.Delete(outDir, recursive: true); } catch { /* best-effort cleanup */ }
-            }
+            byte[] fres = McSharp.MeshCodec.DecompressMc(File.ReadAllBytes(mcPath), out var status)
+                ?? throw new InvalidDataException($"McSharp failed on {mcPath}: {status}");
+            if (fres.Length < 4 || fres[0] != 'F' || fres[1] != 'R' || fres[2] != 'E' || fres[3] != 'S')
+                throw new InvalidDataException($"{mcPath}: decompressed data does not start with 'FRES'");
+            return fres;
         }
 
         /// <summary>

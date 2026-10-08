@@ -1,7 +1,6 @@
 using System;
 using System.IO;
-using Syroot.NintenTools.NSW.Bntx;
-using Syroot.NintenTools.NSW.Bntx.GFX;
+using BntxSharp;
 
 namespace ShaderLibrary.CompileTool
 {
@@ -69,77 +68,65 @@ namespace ShaderLibrary.CompileTool
                 tex.Surfaces.RemoveAll(s => s.MipLevel != 0);
                 return tex;
             }
-            byte[] raw = File.ReadAllBytes(path);
-            byte[] data = TotkCommon.Zstd.IsCompressed(raw) ? TotkCommon.Totk.Zstd.Decompress(raw) : raw;
-            using var ms = new MemoryStream(data);
-            Texture source = new BntxFile(ms).Textures[0];
+            BntxTexture source = ReadBntx(path);
             TxtgFormat format = MapFormat(source.Format)
                 ?? throw new NotSupportedException($"BNTX format {source.Format} (0x{(uint)source.Format:X}) has no TXTG equivalent here");
             var result = new TxtgTexture
             {
-                Width = (int)source.Width,
-                Height = (int)source.Height,
+                Width = source.Width,
+                Height = source.Height,
                 Depth = 1,
                 MipCount = 1,
-                ArrayCount = source.TextureData.Count,
+                ArrayCount = source.ArrayLength,
                 Format = format,
             };
-            for (int slice = 0; slice < source.TextureData.Count; slice++)
-            {
-                byte[] swizzled = source.TextureData[slice][0];
-                int padded = TegraX1Deswizzle.PaddedSize(format, result.Height, result.Width, result.Height);
-                if (swizzled.Length < padded)
-                    Array.Resize(ref swizzled, padded);
-                result.Surfaces.Add(new TxtgSurface
-                {
-                    ArrayLevel = slice,
-                    MipLevel = 0,
-                    Data = TegraX1Deswizzle.Deswizzle(swizzled, format, result.Height, result.Width, result.Height),
-                });
-            }
+            for (int slice = 0; slice < source.ArrayLength; slice++)
+                result.Surfaces.Add(new TxtgSurface { ArrayLevel = slice, MipLevel = 0, Data = source.GetDeswizzledData(0, slice) });
             return result;
+        }
+
+        static BntxTexture ReadBntx(string path)
+        {
+            byte[] raw = File.ReadAllBytes(path);
+            byte[] data = TotkCommon.Zstd.IsCompressed(raw) ? TotkCommon.Totk.Zstd.Decompress(raw) : raw;
+            return BntxFile.Load(data).Textures[0];
         }
 
         static TxtgTexture LoadBntx(string path, int surfaces)
         {
-            byte[] raw = File.ReadAllBytes(path);
-            byte[] data = TotkCommon.Zstd.IsCompressed(raw) ? TotkCommon.Totk.Zstd.Decompress(raw) : raw;
-            using var ms = new MemoryStream(data);
-            Texture source = new BntxFile(ms).Textures[0];
-
+            BntxTexture source = ReadBntx(path);
             TxtgFormat format = MapFormat(source.Format)
                 ?? throw new NotSupportedException($"BNTX format {source.Format} (0x{(uint)source.Format:X}) has no TXTG equivalent here");
 
             var tex = new TxtgTexture
             {
-                Width = (int)source.Width,
-                Height = (int)source.Height,
+                Width = source.Width,
+                Height = source.Height,
                 Depth = 1,
                 MipCount = 1,
                 ArrayCount = 1,
                 Format = format,
-                CompSelect = [Channel(source.ChannelRed, 0), Channel(source.ChannelGreen, 1), Channel(source.ChannelBlue, 2), Channel(source.ChannelAlpha, 3)],
+                CompSelect = [Channel(source.ChannelTypes[0], 0), Channel(source.ChannelTypes[1], 1), Channel(source.ChannelTypes[2], 2), Channel(source.ChannelTypes[3], 3)],
             };
             if (surfaces <= 0)
                 return tex;
 
-            // TextureData is [array slice][mip]; preparation only ever uses the first.
-            byte[] swizzled = source.TextureData[0][0];
+            // Preparation only ever uses the first slice's top mip.
             tex.Surfaces.Add(new TxtgSurface
             {
                 ArrayLevel = 0,
                 MipLevel = 0,
-                Data = TegraX1Deswizzle.Deswizzle(swizzled, format, tex.Height, tex.Width, tex.Height),
+                Data = source.GetDeswizzledData(),
             });
             return tex;
         }
 
-        // By the format's raw code first: Syroot's enum names predate some of the codes TotK uses
+        // By the format's raw code first: BntxSharp's enum names predate some of the codes TotK uses
         // and call them something else entirely (WaterAlb's RGBA8 reads as D32_FLOAT_S8X24_UINT).
         static TxtgFormat? MapFormat(SurfaceFormat format) => (uint)format switch
         {
             0x0B01 => TxtgFormat.R8G8B8A8_UNORM,
-            // Named D32_FLOAT_S8X24_UINT by both Syroot and BntxSharp, but WaterAlb's texels under
+            // Named D32_FLOAT_S8X24_UINT by BntxSharp, but WaterAlb's texels under
             // this code are plainly four half floats - colours with alpha 1.0.
             0x1505 => TxtgFormat.R16G16B16A16_FLOAT,
             0x0B06 => TxtgFormat.R8G8B8A8_SRGB,

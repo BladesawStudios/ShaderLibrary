@@ -175,10 +175,10 @@ namespace ShaderLibrary.CompilerTool
             if (args.Contains("--inspect-bntx"))
             {
                 string bntxPath = positional.Length > 0 ? positional[0] : "";
-                var bntxFile = new Syroot.NintenTools.NSW.Bntx.BntxFile(bntxPath);
+                var bntxFile = BntxSharp.BntxFile.LoadFile(bntxPath);
                 foreach (var t in bntxFile.Textures)
                 {
-                    Console.WriteLine($"{t.Name}: {t.Width}x{t.Height}x{t.Depth} array={t.ArrayLength} mips={t.MipCount} format={t.Format} dim={t.Dim} tileMode={t.TileMode} imageSize={t.ImageSize}");
+                    Console.WriteLine($"{t.Name}: {t.Width}x{t.Height}x{t.Depth} array={t.ArrayLength} mips={t.MipCount} format={t.Format} dim={t.Dim} tileMode={t.TileMode} imageSize={t.Data.Length}");
                 }
                 return;
             }
@@ -238,11 +238,10 @@ namespace ShaderLibrary.CompilerTool
             if (args.Contains("--dump-bntx"))
             {
                 string bntxPath = positional.Length > 0 && File.Exists(positional[0]) ? positional[0] : (positional.Length > 1 ? positional[1] : "temp_icon.bntx");
-                var bntx = new Syroot.NintenTools.NSW.Bntx.BntxFile(bntxPath);
+                var bntx = BntxSharp.BntxFile.LoadFile(bntxPath);
                 var tex = bntx.Textures[0];
                 Console.WriteLine($"Texture: {tex.Name}, {tex.Width}x{tex.Height}, format={tex.Format}");
-                byte[] swizzled = tex.TextureData[0][0];
-                byte[] deswizzled = TegraX1Deswizzle.Deswizzle(swizzled, TxtgFormat.BC7_UNORM, (int)tex.Height, (int)tex.Width, (int)tex.Height);
+                byte[] deswizzled = tex.GetDeswizzledData();
                 File.WriteAllBytes("vanilla_icon_bc7.bin", deswizzled);
                 Console.WriteLine($"Wrote {deswizzled.Length} bytes to vanilla_icon_bc7.bin");
                 return;
@@ -523,15 +522,6 @@ namespace ShaderLibrary.CompilerTool
                     shown++;
                 }
                 Console.WriteLine($"[list-sarc] {shown} entries shown.");
-                return;
-            }
-
-            if (args.Contains("--find-txtg-by-bytes"))
-            {
-                // Identify which romfs texture a captured surface actually is, by raw block bytes -
-                // see SystemTextures.FindTxtgByBytes for why name/concept searching is not enough.
-                // Usage: --find-txtg-by-bytes <romfs> <reference.bin>
-                SystemTextures.FindTxtgByBytes(romfsRoot, positional[1]);
                 return;
             }
 

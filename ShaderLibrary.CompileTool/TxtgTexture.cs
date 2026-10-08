@@ -1,35 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Runtime.InteropServices;
+using System.Linq;
 
 namespace ShaderLibrary.CompileTool
 {
-    /// <summary>
-    /// TotK ships textures as "*.txtg" ("Texture To Go", magic "6PK0") rather than plain .bntx.
-    /// This is a from-scratch port of the parsing logic in Switch-Toolbox's own
-    /// File_Format_Library/FileFormats/Texture/TXTG.cs reference implementation - trimmed down to
-    /// just parsing + deswizzling (no WinForms/editor/save support, none of which this tool needs).
-    ///
-    /// Container layout (fixed 0x50-byte header, all little-endian):
-    ///   u16 HeaderSize (=0x50), u16 Version, char[4] Magic="6PK0", u16 Width, u16 Height,
-    ///   u16 Depth, u8 MipCount, u8/u8/u16 unknown+padding, u8 FormatFlag, u32 FormatSetting,
-    ///   u8x4 channel swizzle selectors, byte[32] Hash, u16 Format, u16 Unknown3,
-    ///   u32 x4 more texture settings (unused here).
-    /// Then, for MipCount*ArrayCount surfaces: a small index (u16 ArrayLevel, u8 MipLevel,
-    /// u8 pad) per surface, followed by (u32 Size, u32 const-6) per surface, then the raw
-    /// surface bytes back to back - each surface individually zstd-compressed with NO
-    /// dictionary (confirmed against Switch-Toolbox's Zstb.SDecompress call site: it's called
-    /// with no filename context, so its dictionary auto-selection never matches, unlike the
-    /// dictionary-compressed .bfsha.zs/.pack.zs files elsewhold in romfs).
-    ///
-    /// Each decompressed surface is still in the GPU's native Tegra X1 block-linear tiled
-    /// layout, not row-major - TegraX1Deswizzle (ported from the same reference, using the
-    /// same native tegra_swizzle_x64.dll Switch-Toolbox ships) converts it to a linear buffer
-    /// of the block-compressed format's own blocks, ready for direct GPU upload
-    /// (glCompressedTexImage2D or equivalent - these formats don't need decoding to RGBA,
-    /// they're already GPU-native compressed formats).
-    /// </summary>
     public enum TxtgFormat
     {
         BC1_UNORM,
@@ -59,6 +34,10 @@ namespace ShaderLibrary.CompileTool
         public byte[] Data = Array.Empty<byte>(); // deswizzled, linear block-compressed data
     }
 
+    /// <summary>
+    /// A texture as the rest of preparation uses it: a size, a format and its surfaces as linear GPU-native blocks. A <c>.txtg</c> is read
+    /// with TxtgSharp, which also deswizzles it; other containers (<see cref="TexToGo"/>'s BNTX path) fill the same shape.
+    /// </summary>
     public class TxtgTexture
     {
         public int Width;
@@ -69,52 +48,7 @@ namespace ShaderLibrary.CompileTool
         public TxtgFormat Format;
         public byte[] Hash = Array.Empty<byte>();
         public List<TxtgSurface> Surfaces = new();
-        /// <summary>
-        /// The container's own real, authored per-texture channel-selector bytes (which SOURCE
-        /// channel - 0=R,1=G,2=B,3=A, plus 4/5 meaning constant-0/constant-1 on some other Nintendo
-        /// texture containers, not observed in this game's TXTG data so far - feeds each OUTPUT
-        /// channel, in R,G,B,A order).
-        ///
-        /// A first attempt to wire this up (deriving an ALTERNATE encoding via Ghidra against a
-        /// general BNTX/BRTI trace, applied project-wide) was REVERTED - it broke textures broadly.
-        /// That derivation simply doesn't hold for how TXTG stores this field: cross-checking raw
-        /// bytes straight off romfs for several real textures (bypassing this parser entirely, to
-        /// rule out a parsing bug) shows the ORIGINAL Switch-Toolbox-derived interpretation
-        /// (0=R,1=G,2=B,3=A) is the one that's actually correct here - under it, the overwhelming
-        /// majority of textures carry the trivial identity `[0,1,2,3]` (a genuine no-op, confirmed
-        /// on both a known-good texture AND, in one case, a texture whose own shader math turned out
-        /// to depend on something else entirely - see `Npc_Ganondorf_Miasma_Body_Gn5`'s own
-        /// investigation), while several real "Gn4"/"AO"-style mask textures across UNRELATED
-        /// character models (Zelda, Link, Ganondorf Mummy, MiasmaTentacle) consistently carry the
-        /// genuinely non-trivial `[0,1,1,1]` - "B and A both source real channel G", a standard trick
-        /// for packing extra mask data into a 2-channel BC5 texture's otherwise-constant B/A reads.
-        /// That consistency across unrelated assets is what makes this encoding trustworthy where
-        /// the earlier one wasn't. See <c>Marrow.Core.Assets.TextureCache.ApplySwizzle</c> for where
-        /// this now gets applied - identity values are a safe no-op, so only the genuinely-marked
-        /// minority of textures are affected.
-        /// </summary>
         public byte[] CompSelect = [0, 1, 2, 3];
-
-        static readonly Dictionary<ushort, TxtgFormat> FormatList = new()
-        {
-            { 0x101, TxtgFormat.ASTC_4x4_UNORM },
-            { 0x102, TxtgFormat.ASTC_8x8_UNORM },
-            { 0x105, TxtgFormat.ASTC_8x8_SRGB },
-            { 0x109, TxtgFormat.ASTC_4x4_SRGB },
-            { 0x202, TxtgFormat.BC1_UNORM },
-            { 0x203, TxtgFormat.BC1_UNORM_SRGB },
-            { 0x302, TxtgFormat.BC1_UNORM },
-            { 0x505, TxtgFormat.BC3_UNORM_SRGB },
-            { 0x602, TxtgFormat.BC4_UNORM },
-            { 0x606, TxtgFormat.BC4_UNORM },
-            { 0x607, TxtgFormat.BC4_UNORM },
-            { 0x609, TxtgFormat.BC4_UNORM },
-            { 0x702, TxtgFormat.BC5_UNORM },
-            { 0x703, TxtgFormat.BC5_UNORM },
-            { 0x707, TxtgFormat.BC5_UNORM },
-            { 0x709, TxtgFormat.BC5_UNORM },
-            { 0x901, TxtgFormat.BC7_UNORM },
-        };
 
         public static (uint bpp, uint blockW, uint blockH) GetFormatInfo(TxtgFormat format) => format switch
         {
@@ -139,227 +73,65 @@ namespace ShaderLibrary.CompileTool
             _ => throw new NotSupportedException($"Unhandled TxtgFormat {format}"),
         };
 
-        struct SurfaceHeader
-        {
-            public ushort ArrayLevel;
-            public byte MipLevel;
-            public uint Size;
-        }
-
-        /// <param name="surfaces">
-        /// How many surfaces to decode, in file order (every array layer's mip 0 first, then each
-        /// layer's mip 1, ...): 0 reads only the header, 1 only the first layer's mip 0. Each one
-        /// is a zstd decompress plus a deswizzle, and preparation only ever uses the header or
-        /// <c>Surfaces[0]</c> - decoding all of them made a 121-layer, 11-mip material array cost
-        /// 1331 surfaces to export one, and its 1x1 tail mips panic tegra_swizzle.
-        /// </param>
-        public static TxtgTexture Load(string path, int surfaces = int.MaxValue)
-        {
-            using var fs = File.OpenRead(path);
-            return Load(fs, surfaces);
-        }
+        /// <param name="surfaces">How many surfaces, in file order, to deswizzle; 0 reads the header only.</param>
+        public static TxtgTexture Load(string path, int surfaces = int.MaxValue) =>
+            FromFile(TxtgSharp.TxtgFile.FromFile(path), surfaces);
 
         public static TxtgTexture Load(Stream stream, int surfaces = int.MaxValue)
         {
-            using var reader = new BinaryReader(stream, System.Text.Encoding.ASCII, leaveOpen: true);
+            using var copy = new MemoryStream();
+            stream.CopyTo(copy);
+            return FromFile(TxtgSharp.TxtgFile.FromBytes(copy.ToArray()), surfaces);
+        }
 
-            ushort headerSize = reader.ReadUInt16();
-            ushort version = reader.ReadUInt16();
-            byte[] magicBytes = reader.ReadBytes(4);
-            string magic = System.Text.Encoding.ASCII.GetString(magicBytes);
-            if (magic != "6PK0")
-                throw new InvalidDataException($"Not a TXTG file - expected magic \"6PK0\", got \"{magic}\"");
-
-            var tex = new TxtgTexture();
-            tex.Width = reader.ReadUInt16();
-            tex.Height = reader.ReadUInt16();
-            tex.Depth = reader.ReadUInt16();
-            tex.MipCount = reader.ReadByte();
-            reader.ReadByte(); // Unknown1
-            reader.ReadByte(); // Unknown2
-            reader.ReadUInt16(); // Padding
-
-            reader.ReadByte(); // FormatFlag
-            reader.ReadUInt32(); // FormatSetting
-
-            tex.CompSelect = reader.ReadBytes(4); // CompSelect R,G,B,A - see the field's own remarks
-
-            tex.Hash = reader.ReadBytes(32);
-
-            ushort formatCode = reader.ReadUInt16();
-            reader.ReadUInt16(); // Unknown3
-
-            reader.ReadUInt32(); // TextureSetting1
-            uint textureSetting2 = reader.ReadUInt32();
-            reader.ReadUInt32(); // TextureSetting3
-            reader.ReadUInt32(); // TextureSetting4
-
-            if (!FormatList.TryGetValue(formatCode, out TxtgFormat format))
-                throw new NotSupportedException($"Unsupported TXTG format code 0x{formatCode:X}");
-            tex.Format = format;
-
-            // Same "dumb hack" as the reference: terrain textures are 8x8 ASTC but share the
-            // 0x101 (normally 4x4 ASTC) format code - TextureSetting2 disambiguates. 32628
-            // (8x5 ASTC) isn't in TxtgFormat yet - none of the materials dumped so far (sword,
-            // creatures) hit it, only terrain does.
-            if (textureSetting2 == 32628)
-                throw new NotSupportedException("ASTC_8x5_UNORM (terrain textures) not implemented yet.");
-            if (textureSetting2 == 32631) tex.Format = TxtgFormat.ASTC_8x8_UNORM;
-
-            tex.ArrayCount = tex.Depth;
-            int surfaceCount = tex.MipCount * tex.ArrayCount;
-            int decodeCount = Math.Clamp(surfaces, 0, surfaceCount);
-
-            reader.BaseStream.Seek(headerSize, SeekOrigin.Begin);
-
-            var headers = new SurfaceHeader[surfaceCount];
-            for (int i = 0; i < surfaceCount; i++)
+        static TxtgTexture FromFile(TxtgSharp.TxtgFile file, int surfaces)
+        {
+            var (red, green, blue, alpha) = file.ChannelSelectors;
+            var tex = new TxtgTexture
             {
-                headers[i].ArrayLevel = reader.ReadUInt16();
-                headers[i].MipLevel = reader.ReadByte();
-                reader.ReadByte(); // always 1
-            }
-            for (int i = 0; i < surfaceCount; i++)
-            {
-                headers[i].Size = reader.ReadUInt32();
-                reader.ReadUInt32(); // always 6
-            }
+                Width = file.Width,
+                Height = file.Height,
+                Depth = file.LayerCount,
+                ArrayCount = file.LayerCount,
+                MipCount = file.MipCount,
+                Format = Map(file),
+                CompSelect = [red, green, blue, alpha],
+            };
 
-            if (decodeCount == 0)
-                return tex;
-
-            using var decompressor = new ZstdNet.Decompressor();
-
-            for (int i = 0; i < decodeCount; i++)
-            {
-                byte[] compressed = reader.ReadBytes((int)headers[i].Size);
-                byte[] raw = decompressor.Unwrap(compressed);
-
-                int mipWidth = Math.Max(1, tex.Width >> headers[i].MipLevel);
-                int mipHeight = Math.Max(1, tex.Height >> headers[i].MipLevel);
-                // Surfaces are stored trimmed of their trailing block-linear padding - most by a few
-                // hundred bytes, a tail mip to a fraction of the one 512-byte GOB it still occupies -
-                // and the native deswizzle panics, taking the process with it, when handed less than
-                // the whole padded surface. The missing bytes are padding no texel lives in.
-                int padded = TegraX1Deswizzle.PaddedSize(tex.Format, tex.Height, mipWidth, mipHeight);
-                if (raw.Length < padded)
-                    Array.Resize(ref raw, padded);
-                byte[] deswizzled = TegraX1Deswizzle.Deswizzle(raw, tex.Format, tex.Height, mipWidth, mipHeight);
-
-                tex.Surfaces.Add(new TxtgSurface
-                {
-                    ArrayLevel = headers[i].ArrayLevel,
-                    MipLevel = headers[i].MipLevel,
-                    Data = deswizzled,
-                });
-            }
-
+            foreach (var surface in file.Surfaces.Take(Math.Clamp(surfaces, 0, file.Surfaces.Count)))
+                tex.Surfaces.Add(new TxtgSurface { ArrayLevel = surface.ArrayIndex, MipLevel = surface.MipLevel, Data = surface.Data });
             return tex;
         }
-    }
 
-    /// <summary>
-    /// Minimal port of TegraX1Swizzle.cs's block-linear deswizzle path (the only path TXTG
-    /// actually uses - LinearTileMode is never set for these files) via the same native
-    /// tegra_swizzle_x64.dll Switch-Toolbox ships (https://github.com/ScanMountGoat/tegra_swizzle).
-    /// Trimmed to x64-only (this tool only runs as a 64-bit process) and to just the one
-    /// operation needed: deswizzle a single mip's surface data.
-    /// </summary>
-    static class TegraX1Deswizzle
-    {
-        [StructLayout(LayoutKind.Sequential)]
-        struct BlockDim
+        // ASTC's footprint comes from the file's block info, not from the format code: terrain textures share a code with the 4x4 ones.
+        static TxtgFormat Map(TxtgSharp.TxtgFile file)
         {
-            public ulong width, height, depth;
-        }
-
-        [DllImport("tegra_swizzle_x64", EntryPoint = "deswizzle_block_linear")]
-        static extern unsafe void DeswizzleBlockLinear(ulong width, ulong height, ulong depth,
-            byte* source, ulong sourceLength, byte* destination, ulong destinationLength,
-            ulong blockHeight, ulong bytesPerPixel);
-
-        [DllImport("tegra_swizzle_x64", EntryPoint = "block_height_mip0")]
-        static extern ulong BlockHeightMip0(ulong height);
-
-        [DllImport("tegra_swizzle_x64", EntryPoint = "mip_block_height")]
-        static extern ulong MipBlockHeight(ulong mipHeightInBlocks, ulong blockHeightMip0);
-
-        static uint DivRoundUp(uint n, uint d) => (n + d - 1) / d;
-
-        /// <summary>
-        /// fullTextureHeight is the texture's mip-0 height (pixels) - blockHeightMip0 is always
-        /// derived from the FULL texture, not the current mip, then reduced per mip via
-        /// MipBlockHeight. Getting this backwards (deriving blockHeightMip0 from the mip's own
-        /// height) silently produces a wrong-but-plausible-looking deswizzle for every mip except
-        /// mip 0.
-        /// </summary>
-        /// <summary>The size of a mip's whole block-linear surface, padding included - what the native deswizzle reads.</summary>
-        public static int PaddedSize(TxtgFormat format, int fullTextureHeight, int mipWidth, int mipHeight)
-        {
-            var (bpp, blockW, blockH) = TxtgTexture.GetFormatInfo(format);
-            uint widthInBlocks = DivRoundUp((uint)mipWidth, blockW);
-            uint heightInBlocks = DivRoundUp((uint)mipHeight, blockH);
-            ulong blockHeight = MipBlockHeight(heightInBlocks, BlockHeightMip0(DivRoundUp((uint)fullTextureHeight, blockH)));
-            // A GOB is 64 bytes by 8 rows; a block is blockHeight GOBs stacked.
-            ulong gobsWide = (widthInBlocks * (ulong)bpp + 63) / 64;
-            ulong blocksHigh = (heightInBlocks + 8 * blockHeight - 1) / (8 * blockHeight);
-            return (int)(gobsWide * blocksHigh * blockHeight * 512);
-        }
-
-        public static byte[] Deswizzle(byte[] swizzledData, TxtgFormat format, int fullTextureHeight, int mipWidth, int mipHeight)
-        {
-            var (bpp, blockW, blockH) = TxtgTexture.GetFormatInfo(format);
-
-            uint widthInBlocks = DivRoundUp((uint)mipWidth, blockW);
-            uint heightInBlocks = DivRoundUp((uint)mipHeight, blockH);
-            uint fullHeightInBlocks = DivRoundUp((uint)fullTextureHeight, blockH);
-
-            ulong blockHeightMip0 = BlockHeightMip0(fullHeightInBlocks);
-            ulong mipBlockHeight = MipBlockHeight(heightInBlocks, blockHeightMip0);
-
-            var output = new byte[widthInBlocks * heightInBlocks * bpp];
-
-            unsafe
+            bool srgb = TxtgSharp.TxtgFormats.IsSrgb(file.Format);
+            var block = file.BlockInfo;
+            return file.Format switch
             {
-                fixed (byte* srcPtr = swizzledData)
-                fixed (byte* dstPtr = output)
+                TxtgSharp.TxtgFormat.Bc1Unorm => TxtgFormat.BC1_UNORM,
+                TxtgSharp.TxtgFormat.Bc1UnormSrgb => TxtgFormat.BC1_UNORM_SRGB,
+                TxtgSharp.TxtgFormat.Bc3UnormSrgb => TxtgFormat.BC3_UNORM_SRGB,
+                TxtgSharp.TxtgFormat.Bc4Unorm => TxtgFormat.BC4_UNORM,
+                TxtgSharp.TxtgFormat.Bc5Unorm => TxtgFormat.BC5_UNORM,
+                TxtgSharp.TxtgFormat.Bc7Unorm => TxtgFormat.BC7_UNORM,
+                TxtgSharp.TxtgFormat.R8G8B8A8Unorm => TxtgFormat.R8G8B8A8_UNORM,
+                _ when TxtgSharp.TxtgFormats.IsAstc(file.Format) => (block.Width, block.Height, srgb) switch
                 {
-                    DeswizzleBlockLinear(widthInBlocks, heightInBlocks, 1,
-                        srcPtr, (ulong)swizzledData.Length, dstPtr, (ulong)output.Length,
-                        mipBlockHeight, bpp);
-                }
-            }
-
-            return output;
-        }
-
-        /// <summary>
-        /// Same operation as <see cref="Deswizzle"/>, generalized to a genuine 3D (volume)
-        /// texture's mip 0 - depth is real texel depth, not divided by any block factor, since
-        /// none of the block-compressed formats this tool handles block along Z (only X/Y).
-        /// </summary>
-        public static byte[] Deswizzle3D(byte[] swizzledData, TxtgFormat format, int width, int height, int depth)
-        {
-            var (bpp, blockW, blockH) = TxtgTexture.GetFormatInfo(format);
-
-            uint widthInBlocks = DivRoundUp((uint)width, blockW);
-            uint heightInBlocks = DivRoundUp((uint)height, blockH);
-            ulong blockHeightMip0 = BlockHeightMip0(heightInBlocks);
-
-            var output = new byte[widthInBlocks * heightInBlocks * (uint)depth * bpp];
-
-            unsafe
-            {
-                fixed (byte* srcPtr = swizzledData)
-                fixed (byte* dstPtr = output)
-                {
-                    DeswizzleBlockLinear(widthInBlocks, heightInBlocks, (ulong)depth,
-                        srcPtr, (ulong)swizzledData.Length, dstPtr, (ulong)output.Length,
-                        blockHeightMip0, bpp);
-                }
-            }
-
-            return output;
+                    (4, 4, false) => TxtgFormat.ASTC_4x4_UNORM,
+                    (4, 4, true) => TxtgFormat.ASTC_4x4_SRGB,
+                    (8, 8, false) => TxtgFormat.ASTC_8x8_UNORM,
+                    (8, 8, true) => TxtgFormat.ASTC_8x8_SRGB,
+                    (8, 6, false) => TxtgFormat.ASTC_8x6_UNORM,
+                    (8, 6, true) => TxtgFormat.ASTC_8x6_SRGB,
+                    (8, 5, false) => TxtgFormat.ASTC_8x5_UNORM,
+                    (6, 6, false) => TxtgFormat.ASTC_6x6_UNORM,
+                    (5, 5, false) => TxtgFormat.ASTC_5x5_UNORM,
+                    _ => throw new NotSupportedException($"ASTC {block.Width}x{block.Height} ({(srgb ? "sRGB" : "unorm")}) has no TxtgFormat."),
+                },
+                _ => throw new NotSupportedException($"TXTG format {file.FormatName} (0x{file.RawFormatCode:X}) has no TxtgFormat."),
+            };
         }
     }
 }

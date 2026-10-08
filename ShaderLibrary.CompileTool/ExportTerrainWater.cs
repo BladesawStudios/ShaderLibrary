@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text.Json;
 using BfresLibrary;
 using EffectLibraryTest;
-using Syroot.NintenTools.NSW.Bntx;
 
 namespace ShaderLibrary.CompileTool
 {

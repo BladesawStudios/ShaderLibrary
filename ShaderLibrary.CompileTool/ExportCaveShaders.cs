@@ -6,27 +6,10 @@ using EffectLibraryTest;
 namespace ShaderLibrary.CompileTool
 {
     /// <summary>
-    /// The game's cave shaders, from <c>Shader/cave</c>: the programs of its
-    /// <c>cave_chunked_mesh_generic</c> shading model that draw a crbin mesh - the caves, the sky
-    /// islands, the edit parts, the wells and the Depths' caves - and that model's default
-    /// <c>gsys_material</c> block.
+    /// The game's cave shaders from <c>Shader/cave</c> (<c>cave_chunked_mesh_generic</c>), which draw a crbin mesh, and that model's default
+    /// <c>gsys_material</c>. The game's own vertex stage reads the page file as stored, so no host vertex stage is needed. Program 2 is the G-buffer
+    /// program and program 1 (4 is identical) the depth-only one; 0 and 3 are a forward-style program and a visualisation.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Unlike the terrain, nothing here needs a host vertex stage: the game's own vertex stage reads
-    /// the page file's vertices as they are stored (28 bytes: a patch word, a parent block and a
-    /// self block, as two <c>vec4</c>s of raw bits), dequantises them against a per-node block
-    /// (<c>cave_ChunkDynamicDataUBO</c>), picks each vertex's three materials out of the crbin's
-    /// table (<c>cave_MaterialPaletteUBO</c>) and places the result with a per-instance matrix
-    /// (<c>cave_CaveInstanceDynamicDataUBO</c>). The host's job is to feed it those.
-    /// </para>
-    /// <para>
-    /// Program 2 is the G-buffer program: the same outputs (1, 3 and 7) and the same soft edge, reading
-    /// the G-buffer under it, as the terrain's. Program 1 (4 is identical) is depth only, for the
-    /// prepass and the shadow cascades. Programs 0 and 3 are other assigns - the lit forward-style
-    /// program and a visualisation - which a deferred frame has no use for.
-    /// </para>
-    /// </remarks>
     public static class ExportCaveShaders
     {
         public const string ModelName = "cave_chunked_mesh_generic";

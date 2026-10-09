@@ -681,7 +681,7 @@ namespace ShaderLibrary.CompileTool
             {
                 // Through the overlay: a texture-replacement mod wins here even when the model
                 // itself came from the base dump.
-                var txtgPath = assets.FindTexture(tname);
+                var txtgPath = assets.FindTexture(modelName, tname);
                 if (txtgPath is null)
                 {
                     Console.WriteLine($"[ExportTestBench] Texture not found: TexToGo/{tname}");

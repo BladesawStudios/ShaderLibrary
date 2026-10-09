@@ -146,7 +146,7 @@ namespace ShaderLibrary.CompileTool
                     var binProg = bfsha.ShaderModels[shading].GetVariation(gb).BinaryProgram;
                     attrs = ProgramInputs(binProg);
                     vfmt = BuildFormat(attrs.Select(a => a.loc).ToHashSet());
-                    samplers = BuildSamplers(bfsha.ShaderModels[shading], gb, mat, assets);
+                    samplers = BuildSamplers(bfsha.ShaderModels[shading], gb, mat, assets, modelName);
 
                     if (decompiled.Add(gb))
                         DecompileProgram(binProg, shaderOutDir, $"{shading}_prog{gb}");
@@ -156,7 +156,7 @@ namespace ShaderLibrary.CompileTool
                     // cutting, so the bench needs that program to reproduce the cutout.
                     int zo = programs.GetValueOrDefault("zonly", -1);
                     if (zo >= 0)
-                        zonlySamplers = BuildSamplers(bfsha.ShaderModels[shading], zo, mat, assets);
+                        zonlySamplers = BuildSamplers(bfsha.ShaderModels[shading], zo, mat, assets, modelName);
                     if (zo >= 0 && decompiled.Add(zo))
                         DecompileProgram(bfsha.ShaderModels[shading].GetVariation(zo).BinaryProgram,
                                          shaderOutDir, $"{shading}_prog{zo}");
@@ -167,7 +167,7 @@ namespace ShaderLibrary.CompileTool
                     // its materials are render state "custom" with src_alpha/one_minus_src_alpha.
                     int mp = programs.GetValueOrDefault("material", -1);
                     if (mp >= 0)
-                        matSamplers = BuildSamplers(bfsha.ShaderModels[shading], mp, mat, assets);
+                        matSamplers = BuildSamplers(bfsha.ShaderModels[shading], mp, mat, assets, modelName);
                     if (mp >= 0 && decompiled.Add(mp))
                         DecompileProgram(bfsha.ShaderModels[shading].GetVariation(mp).BinaryProgram,
                                          shaderOutDir, $"{shading}_prog{mp}");
@@ -426,7 +426,7 @@ namespace ShaderLibrary.CompileTool
         /// the per-program SamplerIndices to get each one's fragment location, then join through
         /// SamplerAssign -> the material's own sampler list -> the parallel TextureRefs entry.
         /// </summary>
-        static List<string> BuildSamplers(ShaderModel sm, int progIdx, Material mat, IGameAssets assets)
+        static List<string> BuildSamplers(ShaderModel sm, int progIdx, Material mat, IGameAssets assets, string modelName)
         {
             var outList = new List<string>();
             var prog = sm.Programs[progIdx];
@@ -453,7 +453,7 @@ namespace ShaderLibrary.CompileTool
                 string file = "", fmt = "";
                 int w = 0, h = 0;
                 string compSelectField = "";
-                var txtg = assets.FindTexture(texName);
+                var txtg = assets.FindTexture(modelName, texName);
                 if (txtg is not null)
                 {
                     try

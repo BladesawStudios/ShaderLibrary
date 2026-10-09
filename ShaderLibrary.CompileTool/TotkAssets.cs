@@ -23,7 +23,7 @@ namespace ShaderLibrary.CompileTool
             return TestMaterialDump.DecompressBfresMc(mcPath);
         }
 
-        public TextureHandle? FindTexture(string name) =>
+        public TextureHandle? FindTexture(string modelName, string name) =>
             TexToGo.Find(romfsRoot, name) is { } path ? new TextureHandle(surfaces => TexToGo.Load(path, surfaces)) : null;
 
         public IEnumerable<ResFile> AnimationArchives(string modelName, IReadOnlyList<string>? packNames)

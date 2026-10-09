@@ -14,22 +14,20 @@ namespace ShaderLibrary.CompileTool
         static readonly string[] ModelPacks = ["Pack/TitleBG.pack"];
 
         readonly Dictionary<string, List<BntxFile>> _textures = new(StringComparer.OrdinalIgnoreCase);
-        string _currentModel = "";
 
         public IRomAccess Rom => rom;
 
         public byte[]? ReadModel(string modelName)
         {
-            _currentModel = modelName;
             byte[]? data = ReadModelFile($"{modelName}.sbfres");
             if (data == null)
                 Console.WriteLine($"[ExportTestBench] no model '{modelName}' under Model/ or in the packs.");
             return data;
         }
 
-        public TextureHandle? FindTexture(string name)
+        public TextureHandle? FindTexture(string modelName, string name)
         {
-            foreach (BntxFile bntx in TextureArchives())
+            foreach (BntxFile bntx in TextureArchives(modelName))
             {
                 foreach (BntxTexture texture in bntx.Textures)
                     if (texture.Name == name)
@@ -51,12 +49,15 @@ namespace ShaderLibrary.CompileTool
             return path;
         }
 
-        IEnumerable<BntxFile> TextureArchives()
+        List<BntxFile> TextureArchives(string modelName)
         {
-            if (!_textures.TryGetValue(_currentModel, out var list))
+            lock (_textures)
             {
-                list = [];
-                if (ReadModelFile($"{_currentModel}.Tex.sbfres") is { } data)
+                if (_textures.TryGetValue(modelName, out var cached))
+                    return cached;
+
+                var list = new List<BntxFile>();
+                if (ReadModelFile($"{modelName}.Tex.sbfres") is { } data)
                 {
                     using var stream = new MemoryStream(data);
                     var res = new ResFile(stream, false);
@@ -64,9 +65,9 @@ namespace ShaderLibrary.CompileTool
                         if (external.Key.EndsWith(".bntx", StringComparison.OrdinalIgnoreCase))
                             list.Add(BntxFile.Load(external.Value.Data));
                 }
-                _textures[_currentModel] = list;
+                _textures[modelName] = list;
+                return list;
             }
-            return list;
         }
 
         // A model file sits loose under Model/ in some dumps and inside a pack in others.

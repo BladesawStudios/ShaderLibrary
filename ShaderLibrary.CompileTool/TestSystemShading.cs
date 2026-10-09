@@ -44,7 +44,7 @@ namespace ShaderLibrary.CompileTool
         /// resolved via <see cref="TestMaterialDump.DecompressBfresMc"/> the same way every other
         /// romfs model in this tool is.
         /// </param>
-        public static void Run(string systemBfshaPath, string deferredBfresPath, string outDir)
+        public static void Run(string systemBfshaPath, string deferredBfresPath, string outDir, string shadingModelName = "system_shading")
         {
             Directory.CreateDirectory(outDir);
 
@@ -83,7 +83,7 @@ namespace ShaderLibrary.CompileTool
                 // Extract each deferred pass under its OWN pass name rather than a bare program
                 // number, so a file's name says which screen pass it implements.
                 foreach (var kv in resolved.OrderBy(k => k.Key))
-                    ExtractPrograms(bfsha, "system_shading", new[] { kv.Value }, outDir, $"deferred_{kv.Key}");
+                    ExtractPrograms(bfsha, shadingModelName, new[] { kv.Value }, outDir, $"deferred_{kv.Key}");
             }
         }
 

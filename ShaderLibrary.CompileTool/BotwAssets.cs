@@ -3,22 +3,25 @@ using System.Collections.Generic;
 using System.IO;
 using BfresLibrary;
 using BntxSharp;
-using SarcLibrary;
-using Yaz0Sharp;
+using ShaderLibrary.CompileTool.Rom;
 
 namespace ShaderLibrary.CompileTool
 {
-    /// <summary>Breath of the Wild's Switch dump: Yaz0 SARC packs under <c>Pack/</c>, with models and their textures as <c>.sbfres</c> beside them.</summary>
-    public sealed class BotwAssets(string romRoot) : IGameAssets
+    /// <summary>Breath of the Wild's models, textures and shader archives, read through whatever <see cref="IRomAccess"/> the host supplies.</summary>
+    public sealed class BotwAssets(IRomAccess rom) : IGameAssets
     {
-        readonly Dictionary<string, Sarc> _packs = new(StringComparer.OrdinalIgnoreCase);
+        const string GraphicsPack = "Pack/Bootup_Graphics.pack";
+        static readonly string[] ModelPacks = ["Pack/TitleBG.pack"];
 
-        public string RomRoot => romRoot;
+        readonly Dictionary<string, List<BntxFile>> _textures = new(StringComparer.OrdinalIgnoreCase);
+        string _currentModel = "";
+
+        public IRomAccess Rom => rom;
 
         public byte[]? ReadModel(string modelName)
         {
             _currentModel = modelName;
-            byte[]? data = ReadFile($"Model/{modelName}.sbfres");
+            byte[]? data = ReadModelFile($"{modelName}.sbfres");
             if (data == null)
                 Console.WriteLine($"[ExportTestBench] no model '{modelName}' under Model/ or in the packs.");
             return data;
@@ -37,28 +40,23 @@ namespace ShaderLibrary.CompileTool
 
         public IEnumerable<ResFile> AnimationArchives(string modelName, IReadOnlyList<string>? packNames) => [];
 
-        /// <summary>Reads <c>Shader/&lt;name&gt;.product.sbfsha</c> from the graphics pack into <paramref name="directory"/> and returns the path.</summary>
+        /// <summary>Writes <c>Shader/&lt;name&gt;.product.sbfsha</c> from the graphics pack into <paramref name="directory"/>, where the shader tools can open it by path.</summary>
         public string ExtractShaderArchive(string name, string directory)
         {
             string path = Path.Combine(directory, name + ".bfsha");
             if (File.Exists(path))
                 return path;
-            byte[] data = ReadFile($"Shader/{name}.product.sbfsha")
-                ?? throw new FileNotFoundException($"Shader/{name}.product.sbfsha is not in the dump");
             Directory.CreateDirectory(directory);
-            File.WriteAllBytes(path, data);
+            File.WriteAllBytes(path, rom.ReadAllBytesNested($"{GraphicsPack}//Shader/{name}.product.sbfsha").ToArray());
             return path;
         }
-
-        readonly Dictionary<string, List<BntxFile>> _textures = new(StringComparer.OrdinalIgnoreCase);
-        string _currentModel = "";
 
         IEnumerable<BntxFile> TextureArchives()
         {
             if (!_textures.TryGetValue(_currentModel, out var list))
             {
                 list = [];
-                if (ReadFile($"Model/{_currentModel}.Tex.sbfres") is { } data)
+                if (ReadModelFile($"{_currentModel}.Tex.sbfres") is { } data)
                 {
                     using var stream = new MemoryStream(data);
                     var res = new ResFile(stream, false);
@@ -71,22 +69,19 @@ namespace ShaderLibrary.CompileTool
             return list;
         }
 
-        byte[]? ReadFile(string relative)
+        // A model file sits loose under Model/ in some dumps and inside a pack in others.
+        byte[]? ReadModelFile(string fileName)
         {
-            string loose = Path.Combine(romRoot, relative);
-            if (File.Exists(loose))
-                return Yaz0.DecompressIfNeeded(File.ReadAllBytes(loose));
-
-            string packName = relative.StartsWith("Shader/", StringComparison.Ordinal) ? "Bootup_Graphics" : "TitleBG";
-            if (!_packs.TryGetValue(packName, out var pack))
+            string loose = $"Model/{fileName}";
+            if (rom.Exists(loose))
+                return rom.ReadAllBytesNested(loose).ToArray();
+            foreach (string pack in ModelPacks)
             {
-                string packPath = Path.Combine(romRoot, "Pack", packName + ".pack");
-                if (!File.Exists(packPath))
-                    return null;
-                pack = Sarc.FromBinary(new ArraySegment<byte>(Yaz0.DecompressIfNeeded(File.ReadAllBytes(packPath))));
-                _packs[packName] = pack;
+                string nested = $"{pack}//{loose}";
+                if (rom.Exists(nested))
+                    return rom.ReadAllBytesNested(nested).ToArray();
             }
-            return pack.TryGetValue(relative, out var entry) ? Yaz0.DecompressIfNeeded(entry.ToArray()) : null;
+            return null;
         }
     }
 }

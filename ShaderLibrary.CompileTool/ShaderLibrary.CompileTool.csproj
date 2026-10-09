@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\BntxSharp\src\BntxSharp\BntxSharp.csproj" />
     <ProjectReference Include="..\..\McSharp\src\McSharp\McSharp.csproj" />
     <ProjectReference Include="..\..\TxtgSharp\src\TxtgSharp\TxtgSharp.csproj" />
+    <ProjectReference Include="..\..\Yaz0Sharp\src\Yaz0Sharp\Yaz0Sharp.csproj" />
   </ItemGroup>
 
   <ItemGroup>

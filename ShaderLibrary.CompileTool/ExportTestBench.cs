@@ -371,10 +371,10 @@ namespace ShaderLibrary.CompileTool
             public Dictionary<string, Material> ModelMaterials { get; } = new(StringComparer.Ordinal);
         }
 
-        static void ExportAnimsFromResFile(string romfsRoot, ResFile animResFile, string modelName, string outDir,
+        static void ExportAnimsFromResFile(IGameAssets assets, ResFile animResFile, string modelName, string outDir,
             AnimExportState state)
         {
-            ExportTexturePatternAnim.ExportFrom(romfsRoot, animResFile, modelName, outDir, state.TexturePattern, state.PatternTextures);
+            ExportTexturePatternAnim.ExportFrom(assets, animResFile, modelName, outDir, state.TexturePattern, state.PatternTextures);
             ExportMaterialAnim.ExportFrom(animResFile, modelName, outDir, state.Material, state.ModelMaterials);
 
             foreach (SkeletalAnim anim in animResFile.SkeletalAnims.Values)
@@ -394,7 +394,7 @@ namespace ShaderLibrary.CompileTool
         /// <c>.zs</c> suffix is romfs's usual convention for that), so this decompresses it
         /// directly via <c>TotkCommon</c> rather than shelling out to MeshCodec.
         /// </summary>
-        /// <summary>The same archive load <see cref="ExportAnimArchives"/> uses, exposed for <see cref="MaterialAnimInspector"/> - which needs the exact bytes the exporter would see, not a second decompression path that could disagree with it.</summary>
+        /// <summary>The archive load the exporter uses, exposed for <see cref="MaterialAnimInspector"/> - which needs the exact bytes the exporter would see, not a second decompression path that could disagree with it.</summary>
         public static ResFile? LoadAnimArchiveForInspection(string path) => LoadAnimArchive(path);
 
         static ResFile? LoadAnimArchive(string path)
@@ -426,69 +426,19 @@ namespace ShaderLibrary.CompileTool
             }
         }
 
-        /// <summary>
-        /// The AUTHORITATIVE path: export exactly the anim archives an actor's own
-        /// <c>Component/AnimationParam</c> names (<see cref="ActorInfo.Resolve"/>'s
-        /// <c>AnimPackNames</c>) - no guessing at all.
-        /// </summary>
-        public static void ExportAnimArchives(string romfsRoot, IEnumerable<string> animPackNames, string modelName, string outDir,
-            AnimExportState state)
-        {
-            TotkCommon.Totk.Config.GamePath = romfsRoot;
-            foreach (string pack in animPackNames)
-            {
-                string path = RomfsOverlay.Resolve(romfsRoot, "Model", $"{pack}.anim.bfres.zs");
-                if (!File.Exists(path))
-                {
-                    Console.WriteLine($"[ExportTestBench] Actor named anim archive '{pack}.anim.bfres.zs' not found under Model/ - skipping.");
-                    continue;
-                }
-                if (LoadAnimArchive(path) is { } animResFile)
-                    ExportAnimsFromResFile(romfsRoot, animResFile, modelName, outDir, state);
-            }
-        }
-
-        /// <summary>
-        /// FALLBACK for a model with no actor pack to ask (see <see cref="ActorInfo"/>) - guesses
-        /// candidate archives by the model's own pack-name prefix (<c>&lt;Pack&gt;.anim.bfres.zs</c>,
-        /// <c>&lt;Pack&gt;_Animation.anim.bfres.zs</c>, ...) under the same <c>Model/</c> folder.
-        /// Romfs's per-cutscene <c>Dm_XX_...anim.bfres.zs</c> files are named completely
-        /// differently and so are naturally excluded by this prefix match, without needing an
-        /// explicit denylist - but a genuinely mis-guessed prefix could still miss real anims a
-        /// resolved actor pack would have named exactly, which is why this is the fallback, not
-        /// the primary path.
-        /// </summary>
-        public static void ExportExternalAnims(string romfsRoot, string modelName, string outDir, AnimExportState state)
-        {
-            string pack = modelName.Split('.')[0];
-            if (!RomfsOverlay.DirectoryExists(romfsRoot, "Model"))
-                return;
-
-            TotkCommon.Totk.Config.GamePath = romfsRoot;
-            foreach (string found in RomfsOverlay.EnumerateFiles(romfsRoot, "Model", $"{pack}*.anim.bfres.zs").ToList())
-            {
-                // Re-resolved by name so the choice of layer is recorded for cache staleness.
-                string path = RomfsOverlay.Resolve(romfsRoot, "Model", Path.GetFileName(found));
-                if (LoadAnimArchive(path) is { } animResFile)
-                    ExportAnimsFromResFile(romfsRoot, animResFile, modelName, outDir, state);
-            }
-        }
-
         /// <param name="animPackNames">
         /// Exact anim archive pack names to export from (see <see cref="ActorInfo.Resolve"/>'s
         /// <c>AnimPackNames</c>) - null or empty falls back to guessing from <paramref
-        /// name="modelName"/>'s own pack prefix (<see cref="ExportExternalAnims"/>).
+        /// name="modelName"/>'s own pack prefix (<see cref="TotkAssets.AnimationArchives"/>).
         /// </param>
-        public static void ExportModel(string romfsRoot, string modelName, string outDir, IReadOnlyList<string>? animPackNames = null)
+        public static void ExportModel(string romfsRoot, string modelName, string outDir, IReadOnlyList<string>? animPackNames = null) =>
+            ExportModel(new TotkAssets(romfsRoot), modelName, outDir, animPackNames);
+
+        public static void ExportModel(IGameAssets assets, string modelName, string outDir, IReadOnlyList<string>? animPackNames = null)
         {
-            string? mcPath = RomfsPaths.ModelFile(romfsRoot, modelName);
-            if (mcPath == null)
-            {
-                Console.WriteLine($"[ExportTestBench] {RomfsPaths.Explain(romfsRoot, modelName)}");
+            byte[]? fres = assets.ReadModel(modelName);
+            if (fres == null)
                 return;
-            }
-            Console.WriteLine($"[ExportTestBench] Decompressing {mcPath}...");
-            byte[] fres = TestMaterialDump.DecompressBfresMc(mcPath);
 
             using var ms = new MemoryStream(fres);
             var resFile = new ResFile(ms, false);
@@ -509,13 +459,11 @@ namespace ShaderLibrary.CompileTool
                 animState.Skeletal.Add(already);
             foreach (var m in model.Materials)
                 animState.ModelMaterials[m.Key] = m.Value;
-            ExportTexturePatternAnim.ExportFrom(romfsRoot, resFile, modelName, outDir, animState.TexturePattern, animState.PatternTextures);
+            ExportTexturePatternAnim.ExportFrom(assets, resFile, modelName, outDir, animState.TexturePattern, animState.PatternTextures);
             ExportMaterialAnim.ExportFrom(resFile, modelName, outDir, animState.Material, animState.ModelMaterials);
 
-            if (animPackNames is { Count: > 0 })
-                ExportAnimArchives(romfsRoot, animPackNames, modelName, outDir, animState);
-            else
-                ExportExternalAnims(romfsRoot, modelName, outDir, animState);
+            foreach (ResFile animResFile in assets.AnimationArchives(modelName, animPackNames))
+                ExportAnimsFromResFile(assets, animResFile, modelName, outDir, animState);
 
             // Only a genuinely rigid shape (VertexSkinCount == 0 - no per-vertex bone index in
             // BFRES at all, just one Shape.BoneIndex for the whole shape) compiles to a shader
@@ -733,7 +681,7 @@ namespace ShaderLibrary.CompileTool
             {
                 // Through the overlay: a texture-replacement mod wins here even when the model
                 // itself came from the base dump.
-                string? txtgPath = TexToGo.Find(romfsRoot, tname);
+                var txtgPath = assets.FindTexture(tname);
                 if (txtgPath is null)
                 {
                     Console.WriteLine($"[ExportTestBench] Texture not found: TexToGo/{tname}");
@@ -744,7 +692,7 @@ namespace ShaderLibrary.CompileTool
                 // which costs one texture rather than every shape.
                 try
                 {
-                    var (tex, outTex) = TexToGo.ExportMipChain(txtgPath, tname, outDir);
+                    var (tex, outTex) = txtgPath.ExportMipChain(tname, outDir);
                     if (Environment.GetEnvironmentVariable("MC_DEBUG_COMPSELECT") == "1")
                         Console.WriteLine($"[CompSelect] {tname} ({tex.Format}): R={tex.CompSelect[0]} G={tex.CompSelect[1]} B={tex.CompSelect[2]} A={tex.CompSelect[3]}");
                     Console.WriteLine($"[ExportTestBench] Exported texture {tname}: {tex.Width}x{tex.Height} {tex.Format}, {tex.Surfaces.Count} mip(s) -> {outTex}");

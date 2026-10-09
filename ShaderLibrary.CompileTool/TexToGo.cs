@@ -36,16 +36,8 @@ namespace ShaderLibrary.CompileTool
         /// shimmers into moire at a distance. Arrays keep layer 0's mip 0 only: their surfaces run
         /// every layer's mip 0 first, and nothing binds one as a 2D texture past its first layer.
         /// </summary>
-        public static (TxtgTexture Texture, string File) ExportMipChain(string path, string name, string outDir)
-        {
-            var header = Load(path, surfaces: 0);
-            var tex = Load(path, surfaces: header.ArrayCount <= 1 ? header.MipCount : 1);
-            string file = $"{name}_{tex.Width}x{tex.Height}_{tex.Format}.bin";
-            using (var outStream = File.Create(Path.Combine(outDir, file)))
-                foreach (var surf in tex.Surfaces)
-                    outStream.Write(surf.Data);
-            return (tex, file);
-        }
+        public static (TxtgTexture Texture, string File) ExportMipChain(string path, string name, string outDir) =>
+            new TextureHandle(surfaces => Load(path, surfaces)).ExportMipChain(name, outDir);
 
         /// <summary>Loads a file <see cref="Find"/> returned. <paramref name="surfaces"/> as on <see cref="TxtgTexture.Load(string, int)"/>.</summary>
         public static TxtgTexture Load(string path, int surfaces = int.MaxValue)
@@ -92,9 +84,11 @@ namespace ShaderLibrary.CompileTool
             return BntxFile.Load(data).Textures[0];
         }
 
-        static TxtgTexture LoadBntx(string path, int surfaces)
+        static TxtgTexture LoadBntx(string path, int surfaces) => FromBntx(ReadBntx(path), surfaces);
+
+        /// <summary>A texture read out of a BNTX, as <see cref="TxtgTexture"/> with its first slice's top mip.</summary>
+        public static TxtgTexture FromBntx(BntxTexture source, int surfaces)
         {
-            BntxTexture source = ReadBntx(path);
             TxtgFormat format = MapFormat(source.Format)
                 ?? throw new NotSupportedException($"BNTX format {source.Format} (0x{(uint)source.Format:X}) has no TXTG equivalent here");
 

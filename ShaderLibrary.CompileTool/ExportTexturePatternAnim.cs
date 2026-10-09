@@ -44,7 +44,7 @@ namespace ShaderLibrary.CompileTool
         /// candidate archive). Texture names the exported anims can select are added to
         /// <paramref name="texturesToExport"/> for the caller to pull out of <c>TexToGo/</c>.
         /// </summary>
-        public static void ExportFrom(string romfsRoot, ResFile animResFile, string modelName, string outDir,
+        public static void ExportFrom(IGameAssets assets, ResFile animResFile, string modelName, string outDir,
             HashSet<string> alreadyExported, HashSet<string> texturesToExport)
         {
             foreach (MaterialAnim anim in animResFile.TexPatternAnims.Values)
@@ -56,11 +56,11 @@ namespace ShaderLibrary.CompileTool
 
                 string safeAnim = anim.Name.Replace(":", "_").Replace("/", "_");
                 string outPath = Path.Combine(outDir, $"{modelName}.{safeAnim}.texpat.json");
-                Export(romfsRoot, anim, outPath, texturesToExport);
+                Export(assets, anim, outPath, texturesToExport);
             }
         }
 
-        public static void Export(string romfsRoot, MaterialAnim anim, string outPath, HashSet<string> texturesToExport)
+        public static void Export(IGameAssets assets, MaterialAnim anim, string outPath, HashSet<string> texturesToExport)
         {
             var textureNames = anim.TextureNames?.Keys.ToList() ?? new List<string>();
 
@@ -76,7 +76,7 @@ namespace ShaderLibrary.CompileTool
             sb.AppendLine("  \"textures\": [");
             for (int ti = 0; ti < textureNames.Count; ti++)
             {
-                var (texture, file, format, width, height) = ResolveTexture(romfsRoot, textureNames[ti], ti);
+                var (texture, file, format, width, height) = ResolveTexture(assets, textureNames[ti], ti);
                 texturesToExport.Add(texture);
                 sb.Append($"    {{ \"texture\": \"{Escape(texture)}\", \"file\": \"{Escape(file)}\", " +
                           $"\"format\": \"{format}\", \"width\": {width}, \"height\": {height} }}");
@@ -146,10 +146,10 @@ namespace ShaderLibrary.CompileTool
 
         /// <summary>The exported .bin name/format/size for one texture, or empty strings and zeroes if <c>TexToGo/</c> has no such entry or it fails to parse - same tolerance <c>ExportManifest.BuildSamplers</c> has, so one bad texture costs that texture and not the whole anim.</summary>
         static (string Texture, string File, string Format, int Width, int Height) ResolveTexture(
-            string romfsRoot, string textureName, int index)
+            IGameAssets assets, string textureName, int index)
         {
-            string name = DedupeName(romfsRoot, textureName, index);
-            string? txtg = TexToGo.Find(romfsRoot, name);
+            string name = DedupeName(assets, textureName, index);
+            var txtg = assets.FindTexture(name);
             if (txtg is null)
             {
                 Console.WriteLine($"[ExportTestBench] texture pattern anim references '{textureName}', which TexToGo/ does not have.");
@@ -157,7 +157,7 @@ namespace ShaderLibrary.CompileTool
             }
             try
             {
-                var t = TexToGo.Load(txtg, surfaces: 0);
+                var t = txtg.Load(0);
                 int w = (int)t.Width, h = (int)t.Height;
                 string fmt = t.Format.ToString();
                 return (name, $"{name}_{w}x{h}_{fmt}.bin", fmt, w, h);
@@ -183,9 +183,9 @@ namespace ShaderLibrary.CompileTool
         /// removing it does resolve. A texture genuinely named with a trailing digit therefore
         /// survives untouched, because the first condition already failed for it.
         /// </summary>
-        static string DedupeName(string romfsRoot, string textureName, int index)
+        static string DedupeName(IGameAssets assets, string textureName, int index)
         {
-            if (TexToGo.Find(romfsRoot, textureName) is not null)
+            if (assets.FindTexture(textureName) is not null)
                 return textureName;
 
             string suffix = index.ToString(CultureInfo.InvariantCulture);
@@ -193,7 +193,7 @@ namespace ShaderLibrary.CompileTool
                 return textureName;
 
             string stripped = textureName[..^suffix.Length];
-            if (TexToGo.Find(romfsRoot, stripped) is null)
+            if (assets.FindTexture(stripped) is null)
                 return textureName;
 
             Console.WriteLine($"[ExportTestBench] texture pattern anim entry {index} '{textureName}' is BfresLibrary's " +

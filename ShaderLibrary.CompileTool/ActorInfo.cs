@@ -25,7 +25,7 @@ namespace ShaderLibrary.CompileTool
     /// lists <c>AnimationResources[].ModelProjectName</c> - each one is the exact pack prefix of a
     /// sibling <c>Model/&lt;ModelProjectName&gt;.anim.bfres.zs</c> archive holding this actor's real
     /// skeletal anims (idle/walk/attack/...), which is where a creature's actually-useful anim set
-    /// lives, not the model's own .bfres.mc - see <see cref="ExportTestBench.ExportExternalAnims"/>'s
+    /// lives, not the model's own .bfres.mc - see <see cref="TotkAssets.AnimationArchives"/>'s
     /// remarks for why guessing this from the model name alone (a plain pack-prefix glob) is a
     /// weaker fallback, not the primary path, once an actor pack is available to ask instead.
     /// </summary>

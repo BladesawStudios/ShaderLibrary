@@ -86,6 +86,10 @@ namespace ShaderLibrary.CompileTool
         };
 
         public static void Run(string romfsRoot, string bfshaPath, string modelName, string outDir,
+                               string shaderOutDir) =>
+            Run(new TotkAssets(romfsRoot), bfshaPath, modelName, outDir, shaderOutDir);
+
+        public static void Run(IGameAssets assets, string bfshaPath, string modelName, string outDir,
                                string shaderOutDir)
         {
             Directory.CreateDirectory(outDir);
@@ -94,9 +98,7 @@ namespace ShaderLibrary.CompileTool
             // naming the file by index (not by shape) is what lets the manifest reference it.
             var decompiled = new HashSet<int>();
             var bfsha = SharedBfsha.Load(bfshaPath);
-            string mcPath = RomfsPaths.ModelFile(romfsRoot, modelName)
-                            ?? throw new FileNotFoundException(RomfsPaths.Explain(romfsRoot, modelName));
-            byte[] fres = TestMaterialDump.DecompressBfresMc(mcPath);
+            byte[] fres = assets.ReadModel(modelName) ?? throw new FileNotFoundException($"no model '{modelName}'");
             using var ms = new MemoryStream(fres);
             var resFile = new ResFile(ms, false);
             var model = resFile.Models[0];
@@ -144,7 +146,7 @@ namespace ShaderLibrary.CompileTool
                     var binProg = bfsha.ShaderModels[shading].GetVariation(gb).BinaryProgram;
                     attrs = ProgramInputs(binProg);
                     vfmt = BuildFormat(attrs.Select(a => a.loc).ToHashSet());
-                    samplers = BuildSamplers(bfsha.ShaderModels[shading], gb, mat, romfsRoot);
+                    samplers = BuildSamplers(bfsha.ShaderModels[shading], gb, mat, assets);
 
                     if (decompiled.Add(gb))
                         DecompileProgram(binProg, shaderOutDir, $"{shading}_prog{gb}");
@@ -154,7 +156,7 @@ namespace ShaderLibrary.CompileTool
                     // cutting, so the bench needs that program to reproduce the cutout.
                     int zo = programs.GetValueOrDefault("zonly", -1);
                     if (zo >= 0)
-                        zonlySamplers = BuildSamplers(bfsha.ShaderModels[shading], zo, mat, romfsRoot);
+                        zonlySamplers = BuildSamplers(bfsha.ShaderModels[shading], zo, mat, assets);
                     if (zo >= 0 && decompiled.Add(zo))
                         DecompileProgram(bfsha.ShaderModels[shading].GetVariation(zo).BinaryProgram,
                                          shaderOutDir, $"{shading}_prog{zo}");
@@ -165,7 +167,7 @@ namespace ShaderLibrary.CompileTool
                     // its materials are render state "custom" with src_alpha/one_minus_src_alpha.
                     int mp = programs.GetValueOrDefault("material", -1);
                     if (mp >= 0)
-                        matSamplers = BuildSamplers(bfsha.ShaderModels[shading], mp, mat, romfsRoot);
+                        matSamplers = BuildSamplers(bfsha.ShaderModels[shading], mp, mat, assets);
                     if (mp >= 0 && decompiled.Add(mp))
                         DecompileProgram(bfsha.ShaderModels[shading].GetVariation(mp).BinaryProgram,
                                          shaderOutDir, $"{shading}_prog{mp}");
@@ -424,7 +426,7 @@ namespace ShaderLibrary.CompileTool
         /// the per-program SamplerIndices to get each one's fragment location, then join through
         /// SamplerAssign -> the material's own sampler list -> the parallel TextureRefs entry.
         /// </summary>
-        static List<string> BuildSamplers(ShaderModel sm, int progIdx, Material mat, string romfsRoot)
+        static List<string> BuildSamplers(ShaderModel sm, int progIdx, Material mat, IGameAssets assets)
         {
             var outList = new List<string>();
             var prog = sm.Programs[progIdx];
@@ -451,12 +453,12 @@ namespace ShaderLibrary.CompileTool
                 string file = "", fmt = "";
                 int w = 0, h = 0;
                 string compSelectField = "";
-                string? txtg = TexToGo.Find(romfsRoot, texName);
+                var txtg = assets.FindTexture(texName);
                 if (txtg is not null)
                 {
                     try
                     {
-                        var t = TexToGo.Load(txtg, surfaces: 0);
+                        var t = txtg.Load(0);
                         w = (int)t.Width; h = (int)t.Height; fmt = t.Format.ToString();
                         file = $"{texName}_{w}x{h}_{fmt}.bin";
                         compSelectField = $", \"comp_select\": [{string.Join(", ", t.CompSelect)}]";

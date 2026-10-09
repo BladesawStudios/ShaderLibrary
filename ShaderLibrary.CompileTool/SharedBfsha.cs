@@ -12,7 +12,7 @@ namespace ShaderLibrary.CompileTool
     /// Parsing <c>material.*.bfsha</c> takes ~450 ms, and preparing a model used to parse it twice
     /// (<see cref="BuildMaterialUbo"/>, then <see cref="ExportManifest"/>) - for a typical world
     /// object that was 90% of its whole preparation. The archive is a fixed shipped file (mods are
-    /// deliberately not layered over it, see <see cref="RomfsOverlay"/>), and preparation only
+    /// never layered over by mods), and preparation only
     /// reads it, so one instance serves every model and every thread.
     /// </remarks>
     public static class SharedBfsha

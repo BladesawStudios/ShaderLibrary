@@ -33,16 +33,9 @@ namespace ShaderLibrary.CompileTool
     /// </summary>
     public static class TestSystemShading
     {
-        /// <param name="systemBfshaPath">
-        /// Either a plain, already-decompressed ".bfsha" file, or (the normal romfs case) one that
-        /// only exists as "&lt;path&gt;.zs" - resolved the same way <c>BuildMaterialUbo</c>'s own
-        /// system-deferred loading does, so this works directly against real romfs, not just a
-        /// pre-decompressed copy someone made by hand.
-        /// </param>
+        /// <param name="systemBfshaPath">A plain, already-decompressed ".bfsha".</param>
         /// <param name="deferredBfresPath">
-        /// Either a plain ".bfres", or (the normal romfs case) an MCPK-wrapped ".bfres.mc" -
-        /// resolved via <see cref="TestMaterialDump.DecompressBfresMc"/> the same way every other
-        /// romfs model in this tool is.
+        /// A plain, already-decompressed ".bfres".
         /// </param>
         public static void Run(string systemBfshaPath, string deferredBfresPath, string outDir, string shadingModelName = "system_shading")
         {
@@ -52,7 +45,7 @@ namespace ShaderLibrary.CompileTool
             Console.WriteLine($"# System shader archive: {systemBfshaPath}");
             Console.WriteLine("################################################################");
 
-            var bfsha = new BfshaFile(new MemoryStream(LoadPossiblyCompressed(systemBfshaPath)));
+            var bfsha = new BfshaFile(File.OpenRead(systemBfshaPath));
             Console.WriteLine($"ShaderModels ({bfsha.ShaderModels.Count}): {string.Join(", ", bfsha.ShaderModels.Keys)}");
 
             foreach (var smEntry in bfsha.ShaderModels)
@@ -69,13 +62,7 @@ namespace ShaderLibrary.CompileTool
 
             if (!string.IsNullOrEmpty(deferredBfresPath) && File.Exists(deferredBfresPath))
             {
-                // Same convention as BuildMaterialUbo.RunSystemDeferred: the CALLER resolves which
-                // of ".bfres.mc" (real romfs, MCPK-wrapped) or plain ".bfres" (already
-                // decompressed) actually exists and passes that exact path; this just decompresses
-                // based on which one it got.
-                byte[] fres = deferredBfresPath.EndsWith(".mc", StringComparison.OrdinalIgnoreCase)
-                    ? TestMaterialDump.DecompressBfresMc(deferredBfresPath)
-                    : File.ReadAllBytes(deferredBfresPath);
+                byte[] fres = File.ReadAllBytes(deferredBfresPath);
                 var deferredResFile = new ResFile(new MemoryStream(fres), false);
 
                 var resolved = DumpDeferredModel(bfsha, deferredResFile);
@@ -85,16 +72,6 @@ namespace ShaderLibrary.CompileTool
                 foreach (var kv in resolved.OrderBy(k => k.Key))
                     ExtractPrograms(bfsha, shadingModelName, new[] { kv.Value }, outDir, $"deferred_{kv.Key}");
             }
-        }
-
-        /// <summary>Same convention as BuildMaterialUbo's own private helper of the same name: if the plain path exists, it's already decompressed - use it as-is; otherwise it's real romfs, only shipped as "&lt;path&gt;.zs".</summary>
-        static byte[] LoadPossiblyCompressed(string plainPath)
-        {
-            if (File.Exists(plainPath))
-                return File.ReadAllBytes(plainPath);
-            string zsPath = plainPath + ".zs";
-            byte[] raw = File.ReadAllBytes(zsPath);
-            return TotkCommon.Zstd.IsCompressed(raw) ? TotkCommon.Totk.Zstd.Decompress(raw) : raw;
         }
 
         /// <summary>
@@ -273,7 +250,7 @@ namespace ShaderLibrary.CompileTool
                 {
                     try
                     {
-                        var result = TestTOTK.GetShaderProgram(bfsha, resFile, shape.Name, pipeline);
+                        var result = ShaderProgramLookup.GetShaderProgram(bfsha, resFile, shape.Name, pipeline);
                         sb.Append($"  [{pipeline}={result.Item1}]");
                         if (pipeline == "gsys_assign_material" && result.Item1 >= 0)
                             resolved[shape.Name] = result.Item1;

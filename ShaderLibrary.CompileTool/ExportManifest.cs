@@ -85,10 +85,6 @@ namespace ShaderLibrary.CompileTool
             ["105"] = "field_leaf", ["103"] = "field_water", ["2"] = "field_hybrid", ["102"] = "field_miasma",
         };
 
-        public static void Run(string romfsRoot, string bfshaPath, string modelName, string outDir,
-                               string shaderOutDir) =>
-            Run(new TotkAssets(romfsRoot), bfshaPath, modelName, outDir, shaderOutDir);
-
         public static void Run(IGameAssets assets, string bfshaPath, string modelName, string outDir,
                                string shaderOutDir)
         {
@@ -129,7 +125,7 @@ namespace ShaderLibrary.CompileTool
                 {
                     try
                     {
-                        var r = TestTOTK.GetShaderProgram(bfsha, resFile, shape.Name, pipeline);
+                        var r = ShaderProgramLookup.GetShaderProgram(bfsha, resFile, shape.Name, pipeline);
                         programs[pipeline.Replace("gsys_assign_", "")] = r.Item1;
                     }
                     catch { programs[pipeline.Replace("gsys_assign_", "")] = -1; }

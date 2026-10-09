@@ -11,17 +11,6 @@ namespace ShaderLibrary.CompileTool
 {
     public static class ExportTestBench
     {
-        public static void ExportSword(string romfsRoot, string outDir)
-        {
-            Directory.CreateDirectory(outDir);
-            ExportModel(romfsRoot, "Weapon_Sword_070", outDir);
-            ExportModel(romfsRoot, "Weapon_Sword_071", outDir);
-
-            // Environment UBO (352 bytes)
-            byte[] envUbo = GsysUniformBuffers.BuildGsysEnvironment();
-            File.WriteAllBytes(Path.Combine(outDir, "GsysEnvironment.bin"), envUbo);
-        }
-
         /// <summary>
         /// World-space matrix per bone, from the skeleton's local TRS walked down the hierarchy -
         /// the exact walk <c>nn::g3d2::SkeletonObj::CalculateWorldImpl</c> performs (Ghidra:
@@ -385,54 +374,6 @@ namespace ShaderLibrary.CompileTool
                 ExportSkeletalAnim(anim, Path.Combine(outDir, $"{modelName}.{safeAnim}.anim.json"));
             }
         }
-
-        /// <summary>
-        /// Decompresses and parses one <c>Model/&lt;pack&gt;.anim.bfres.zs</c> archive, or returns
-        /// null (with a log line, not an exception) if it's missing/unreadable. Unlike the model's
-        /// own <c>.bfres.mc</c> (a bespoke MCPK/MeshCodec container - see
-        /// <see cref="TestMaterialDump"/>), a <c>.anim.bfres.zs</c> is PLAIN zstd (its own
-        /// <c>.zs</c> suffix is romfs's usual convention for that), so this decompresses it
-        /// directly via <c>TotkCommon</c> rather than shelling out to MeshCodec.
-        /// </summary>
-        /// <summary>The archive load the exporter uses, exposed for <see cref="MaterialAnimInspector"/> - which needs the exact bytes the exporter would see, not a second decompression path that could disagree with it.</summary>
-        public static ResFile? LoadAnimArchiveForInspection(string path) => LoadAnimArchive(path);
-
-        static ResFile? LoadAnimArchive(string path)
-        {
-            byte[] raw;
-            try { raw = File.ReadAllBytes(path); }
-            catch (IOException) { return null; }
-
-            byte[] decompressed;
-            try
-            {
-                decompressed = TotkCommon.Zstd.IsCompressed(raw) ? TotkCommon.Totk.Zstd.Decompress(raw) : raw;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ExportTestBench] SKIPPED anim archive {path}: decompress failed ({ex.Message})");
-                return null;
-            }
-
-            try
-            {
-                using var ms = new MemoryStream(decompressed);
-                return new ResFile(ms, false);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ExportTestBench] SKIPPED anim archive {path}: not a readable BFRES ({ex.Message})");
-                return null;
-            }
-        }
-
-        /// <param name="animPackNames">
-        /// Exact anim archive pack names to export from (see <see cref="ActorInfo.Resolve"/>'s
-        /// <c>AnimPackNames</c>) - null or empty falls back to guessing from <paramref
-        /// name="modelName"/>'s own pack prefix (<see cref="TotkAssets.AnimationArchives"/>).
-        /// </param>
-        public static void ExportModel(string romfsRoot, string modelName, string outDir, IReadOnlyList<string>? animPackNames = null) =>
-            ExportModel(new TotkAssets(romfsRoot), modelName, outDir, animPackNames);
 
         public static void ExportModel(IGameAssets assets, string modelName, string outDir, IReadOnlyList<string>? animPackNames = null)
         {

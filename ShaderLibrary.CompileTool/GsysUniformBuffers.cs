@@ -11,8 +11,7 @@ namespace ShaderLibrary.CompileTool
     /// GL_UNIFORM_BUFFER at bindings 2/5/6 respectively (matching the shader's own `layout
     /// (binding = N, std140)` declarations).
     ///
-    /// Unlike GsysMaterial (built entirely from real per-material ShaderParam data, see
-    /// TestMaterialDump.cs), none of these three are material-authored data - they're driven by
+    /// Unlike GsysMaterial (built entirely from real per-material ShaderParam data), none of these three are material-authored data - they're driven by
     /// the engine per-frame from camera/scene/instance state that doesn't live in any romfs file.
     /// What's REAL here: GsysShape's skin count (Shape.VertexSkinCount) and its identity
     /// transform (representation-independent - see BuildGsysShape remarks). What's a labeled
@@ -80,8 +79,7 @@ namespace ShaderLibrary.CompileTool
         /// cTransform is set to identity here, which sidesteps the row-vs-column-vector ambiguity
         /// entirely: a 3x3 identity linear part is its own transpose, so it's the same bytes
         /// under either convention. cParams.x is the shape's real VertexSkinCount from the bfres
-        /// (0 = rigid/no skinning, matching what TestMaterialDump.DumpGeometry already printed
-        /// for these models). cTranslation is (0,0,0,1) - render the shape at its own local
+        /// (0 = rigid/no skinning). cTranslation is (0,0,0,1) - render the shape at its own local
         /// origin, the sensible default for a standalone viewer with no scene placement.
         /// cUnknown1/2/3 use the values the shader's own comments record having observed
         /// (0, 0, and (1,0,0,0) respectively) rather than blind zero-fill.

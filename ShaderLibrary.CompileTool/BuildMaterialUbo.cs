@@ -43,12 +43,17 @@ namespace ShaderLibrary.CompileTool
             Console.WriteLine($"#   model:   {bfresMcPath}");
             Console.WriteLine("################################################################");
 
-            var bfsha = SharedBfsha.Load(bfshaPath);
             // The DeferredMain system model ships as a plain .bfres; only the game's own models
             // are MCPK-compressed .bfres.mc.
             byte[] fres = bfresMcPath.EndsWith(".mc", StringComparison.OrdinalIgnoreCase)
                 ? TestMaterialDump.DecompressBfresMc(bfresMcPath)
                 : File.ReadAllBytes(bfresMcPath);
+            Run(bfshaPath, fres, outDir);
+        }
+
+        public static void Run(string bfshaPath, byte[] fres, string outDir)
+        {
+            var bfsha = SharedBfsha.Load(bfshaPath);
             using var ms = new MemoryStream(fres);
             var resFile = new ResFile(ms, false);
             BuildForModel(bfsha, resFile.Models[0], outDir);

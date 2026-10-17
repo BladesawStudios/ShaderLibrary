@@ -25,23 +25,36 @@ namespace ShaderLibrary
             set => this[GetKey(index)] = value;
         }
 
+        // The keys in the order they are enumerated, with each one's place, which is what an index means here. Dictionary has no way to ask for the nth key, and
+        // walking to it made every lookup by position a scan of the whole dictionary. Made again whenever the count has changed since.
+        sealed record Order(int Count, string[] Keys, Dictionary<string, int> Index);
+
+        Order _order;
+
+        Order OrderNow()
+        {
+            var held = _order;
+            if (held is not null && held.Count == Count)
+                return held;
+            var keys = new string[Count];
+            var index = new Dictionary<string, int>(Count, StringComparer.Ordinal);
+            int i = 0;
+            foreach (var key in Keys)
+            {
+                keys[i] = key;
+                index.TryAdd(key, i);
+                i++;
+            }
+            return _order = new Order(Count, keys, index);
+        }
+
         public string GetKey(int index)
         {
-            if (index >= 0 && index < Keys.Count)
-                return Keys.ElementAt(index);
-
-            return null;
+            var order = OrderNow();
+            return index >= 0 && index < order.Keys.Length ? order.Keys[index] : null;
         }
 
-        public int GetIndex(string key)
-        {
-            for (int i = 0; i < Keys.Count; i++)
-            {
-                if (Keys.ElementAt(i) == key)
-                    return i;
-            }
-            return -1;
-        }
+        public int GetIndex(string key) => key is not null && OrderNow().Index.TryGetValue(key, out int i) ? i : -1;
 
         public void Read(BinaryDataReader reader)
         {

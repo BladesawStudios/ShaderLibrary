@@ -457,6 +457,8 @@ namespace ShaderLibrary.CompileTool
 
                 var colors0 = helper.Contains("_c0") ? helper["_c0"].Data : null;
                 var uvs1 = helper.Contains("_u1") ? helper["_u1"].Data : null;
+                // The baked-lighting coordinates, which the programs read as aTexCoordBake (location 3).
+                var bakeUvs = helper.Contains("bake") ? helper["bake"].Data : null;
 
                 if (Environment.GetEnvironmentVariable("MC_DEBUG_VERTEXATTRS") == "1")
                 {
@@ -499,8 +501,8 @@ namespace ShaderLibrary.CompileTool
                         float tw = tangents != null ? tangents[i].W : 1f;
                         bw.Write(t0.X); bw.Write(t0.Y); bw.Write(t0.Z); bw.Write(tw);
 
-                        // 4. u254 (vec4 dummy)
-                        bw.Write(0f); bw.Write(0f); bw.Write(0f); bw.Write(0f);
+                        // 4. aTexCoordBake (vec4): the lightmap coordinates a static shape's programs scale into its atlas rectangle; zero where the shape has none.
+                        bw.Write(bakeUvs != null ? bakeUvs[i].X : 0f); bw.Write(bakeUvs != null ? bakeUvs[i].Y : 0f); bw.Write(0f); bw.Write(0f);
 
                         // 5-6. Bone weights (vec4 x 2) - real per-vertex weights for a smooth
                         // shape that has them; full weight on slot 0 otherwise (skin count 1's

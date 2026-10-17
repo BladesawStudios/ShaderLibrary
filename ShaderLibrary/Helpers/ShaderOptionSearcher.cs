@@ -42,8 +42,10 @@ namespace ShaderLibrary.Helpers
             int num_keys_per_program = shader.StaticKeyLength + shader.DynamicKeyLength;
             var idx = num_keys_per_program * programIdx;
 
-            var program_keys = shader.KeyTable.Skip(idx).Take(keys.Length);
-            return keys.SequenceEqual(program_keys);
+            // A span compare: the Skip/Take/SequenceEqual it replaces allocated an enumerator chain for every program tried.
+            if (idx < 0 || idx + keys.Length > shader.KeyTable.Length)
+                return false;
+            return new ReadOnlySpan<int>(shader.KeyTable, idx, keys.Length).SequenceEqual(keys);
         }
 
         public static int[] WriteOptionKeys(ShaderModel shader, Dictionary<string, string> options)

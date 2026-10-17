@@ -43,7 +43,6 @@ namespace ShaderLibrary.CompileTool
             if (programIdx == -1)
                 programIdx = ResolveViaClosestProgram(shader, shader_options);
 
-            Console.WriteLine($"Found index {programIdx}");
 
             //get target variation data
             return Tuple.Create(programIdx, shader.GetVariation(programIdx).BinaryProgram);

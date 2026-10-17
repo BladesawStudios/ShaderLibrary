@@ -115,9 +115,8 @@ namespace ShaderLibrary.Helpers
             //Static key (total * program index)
             int baseIndex = numKeysPerProgram * programIndex;
 
-            for (int j = 0; j < shader.StaticOptions.Count; j++)
+            foreach (var option in shader.StaticOptions.Values)
             {
-                var option = shader.StaticOptions[j];
                 //The options must be the same between bfres and bfsha
                 if (!options.ContainsKey(option.Name))
                     continue;
@@ -133,9 +132,8 @@ namespace ShaderLibrary.Helpers
                     return false;
             }
 
-            for (int j = 0; j < shader.DynamicOptions.Count; j++)
+            foreach (var option in shader.DynamicOptions.Values)
             {
-                var option = shader.DynamicOptions[j];
                 if (!options.ContainsKey(option.Name))
                     continue;
 

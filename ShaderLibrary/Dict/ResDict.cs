@@ -21,23 +21,8 @@ namespace ShaderLibrary
 
         public T this[int index]
         {
-            get
-            {
-                for (int i = 0; i < this.Count; i++)
-                {
-                    if (i ==  index)
-                        return this[GetKey(i)];
-                }
-                return new T();
-            }
-            set
-            {
-                for (int i = 0; i < this.Count; i++)
-                {
-                    if (i == index)
-                        this[GetKey(i)] = value;
-                }
-            }
+            get => this[GetKey(index)];
+            set => this[GetKey(index)] = value;
         }
 
         public string GetKey(int index)

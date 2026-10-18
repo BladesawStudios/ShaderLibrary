@@ -37,16 +37,31 @@ namespace ShaderLibrary.CompileTool
                 DumpAll("dynamic", shader.DynamicOptions);
             }
 
-            //get program
-            var programIdx = shader.GetProgramIndex(shader_options);
-
-            if (programIdx == -1)
-                programIdx = ResolveViaClosestProgram(shader, shader_options);
+            //get program: the answer for a shading model and a set of options never changes, and a map's models share most of their materials, so each is worked out once
+            var programIdx = Remembered(shader, shader_options, () =>
+            {
+                int found = shader.GetProgramIndex(shader_options);
+                return found == -1 ? ResolveViaClosestProgram(shader, shader_options) : found;
+            });
 
             Console.WriteLine($"Found index {programIdx}");
 
             //get target variation data
             return Tuple.Create(programIdx, shader.GetVariation(programIdx).BinaryProgram);
+        }
+
+        // The program found for each set of options, per shading model. Finding one that is not an exact match walks every program of the model more than once.
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ShaderModel, System.Collections.Concurrent.ConcurrentDictionary<string, int>> Found = new();
+
+        static int Remembered(ShaderModel shader, Dictionary<string, string> options, Func<int> find)
+        {
+            var known = Found.GetValue(shader, _ => new System.Collections.Concurrent.ConcurrentDictionary<string, int>(StringComparer.Ordinal));
+            string signature = string.Join(";", options.OrderBy(o => o.Key, StringComparer.Ordinal).Select(o => o.Key + "=" + o.Value));
+            if (known.TryGetValue(signature, out int index))
+                return index;
+            index = find();
+            known[signature] = index;
+            return index;
         }
 
         /// <summary>

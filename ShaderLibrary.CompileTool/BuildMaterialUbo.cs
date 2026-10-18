@@ -68,7 +68,7 @@ namespace ShaderLibrary.CompileTool
 
                 string safe = mat.Name.Replace(":", "_").Replace("/", "_");
                 string path = Path.Combine(outDir, $"{safe}.gsys_material.bin");
-                File.WriteAllBytes(path, buffer);
+                ExportOutput.WriteBytes(path, buffer);
                 WriteParamLayout(block, mat, Path.Combine(outDir, $"{safe}.params.json"));
 
                 Console.WriteLine();

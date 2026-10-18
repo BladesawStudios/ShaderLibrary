@@ -14,9 +14,17 @@ namespace ShaderLibrary.CompileTool
             var header = Load(0);
             var tex = Load(header.ArrayCount <= 1 ? header.MipCount : 1);
             string file = $"{name}_{tex.Width}x{tex.Height}_{tex.Format}.bin";
-            using var outStream = File.Create(Path.Combine(outDir, file));
+            int total = 0;
             foreach (var surf in tex.Surfaces)
-                outStream.Write(surf.Data);
+                total += surf.Data.Length;
+            var bytes = new byte[total];
+            int at = 0;
+            foreach (var surf in tex.Surfaces)
+            {
+                surf.Data.CopyTo(bytes, at);
+                at += surf.Data.Length;
+            }
+            ExportOutput.WriteBytes(Path.Combine(outDir, file), bytes);
             return (tex, file);
         }
     }

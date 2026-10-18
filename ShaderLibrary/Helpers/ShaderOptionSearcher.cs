@@ -14,11 +14,8 @@ namespace ShaderLibrary.Helpers
         {
             //Generate keys of the shader options
             int[] key_lookup = WriteOptionKeys(shader, options);
-            for (int i = 0; i < shader.Programs.Count; i++)
-            {
-                if (IsMatch(shader, i, key_lookup))
-                    return i;
-            }
+            if (ProgramsByKey(shader).TryGetValue(key_lookup, out int found))
+                return found;
 
             Debug.WriteLine($"Failed to find shader. Using backup check.");
 
@@ -37,13 +34,44 @@ namespace ShaderLibrary.Helpers
             return -1;
         }
 
-        static bool IsMatch(ShaderModel shader, int programIdx, int[] keys)
-        {
-            int num_keys_per_program = shader.StaticKeyLength + shader.DynamicKeyLength;
-            var idx = num_keys_per_program * programIdx;
+        // The first program of each key row, so a lookup is a hash and not a walk over every program: a shader has thousands of them and a model asks for one
+        // per material. A row that more than one program has goes to the first, as the walk it replaces did.
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ShaderModel, Dictionary<int[], int>> RowIndex = new();
 
-            var program_keys = shader.KeyTable.Skip(idx).Take(keys.Length);
-            return keys.SequenceEqual(program_keys);
+        static Dictionary<int[], int> ProgramsByKey(ShaderModel shader)
+        {
+            if (RowIndex.TryGetValue(shader, out var ready))
+                return ready;
+            lock (RowIndex)
+            {
+                if (RowIndex.TryGetValue(shader, out var held))
+                    return held;
+                int length = shader.StaticKeyLength + shader.DynamicKeyLength;
+                var rows = new Dictionary<int[], int>(shader.Programs.Count, KeyRowComparer.Instance);
+                for (int i = 0; i < shader.Programs.Count; i++)
+                {
+                    int at = length * i;
+                    if (at < 0 || at + length > shader.KeyTable.Length)
+                        break;
+                    rows.TryAdd(shader.KeyTable.AsSpan(at, length).ToArray(), i);
+                }
+                RowIndex.Add(shader, rows);
+                return rows;
+            }
+        }
+
+        sealed class KeyRowComparer : IEqualityComparer<int[]>
+        {
+            public static readonly KeyRowComparer Instance = new();
+
+            public bool Equals(int[]? x, int[]? y) => x is not null && y is not null && x.AsSpan().SequenceEqual(y);
+
+            public int GetHashCode(int[] row)
+            {
+                var hash = new HashCode();
+                hash.AddBytes(System.Runtime.InteropServices.MemoryMarshal.AsBytes(row.AsSpan()));
+                return hash.ToHashCode();
+            }
         }
 
         public static int[] WriteOptionKeys(ShaderModel shader, Dictionary<string, string> options)
@@ -115,9 +143,8 @@ namespace ShaderLibrary.Helpers
             //Static key (total * program index)
             int baseIndex = numKeysPerProgram * programIndex;
 
-            for (int j = 0; j < shader.StaticOptions.Count; j++)
+            foreach (var option in shader.StaticOptions.Values)
             {
-                var option = shader.StaticOptions[j];
                 //The options must be the same between bfres and bfsha
                 if (!options.ContainsKey(option.Name))
                     continue;
@@ -133,9 +160,8 @@ namespace ShaderLibrary.Helpers
                     return false;
             }
 
-            for (int j = 0; j < shader.DynamicOptions.Count; j++)
+            foreach (var option in shader.DynamicOptions.Values)
             {
-                var option = shader.DynamicOptions[j];
                 if (!options.ContainsKey(option.Name))
                     continue;
 

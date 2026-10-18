@@ -322,9 +322,20 @@ namespace ShaderLibrary.CompileTool
         /// </summary>
         const string DecompilerMarker = "// wrs-decompiler 1";
 
+        // Files found current by this process. The check reads the whole file to see its last line, and every model that uses a program asks for each material of it.
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> KnownCurrent = new(StringComparer.OrdinalIgnoreCase);
+
         static bool IsCurrent(string path)
         {
-            try { return File.Exists(path) && File.ReadAllText(path).TrimEnd().EndsWith(DecompilerMarker, StringComparison.Ordinal); }
+            if (KnownCurrent.ContainsKey(path))
+                return true;
+            try
+            {
+                bool current = File.Exists(path) && File.ReadAllText(path).TrimEnd().EndsWith(DecompilerMarker, StringComparison.Ordinal);
+                if (current)
+                    KnownCurrent[path] = true;
+                return current;
+            }
             catch (IOException) { return false; }
         }
 
@@ -335,8 +346,14 @@ namespace ShaderLibrary.CompileTool
             // as it is, and a new one is written aside and moved into place, so no reader - or
             // second writer - ever sees half a file. Within one process, two models needing the same
             // program take turns on it, so the second finds it done rather than racing the first.
-            lock (DecompileGates.GetOrAdd(Path.Combine(dir, label), _ => new object()))
+            string gate = Path.Combine(dir, label);
+            if (KnownCurrent.ContainsKey(gate + "!done"))
+                return;
+            lock (DecompileGates.GetOrAdd(gate, _ => new object()))
+            {
                 DecompileProgramLocked(binProg, dir, label);
+                KnownCurrent[gate + "!done"] = true;
+            }
         }
 
         static readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> DecompileGates =
@@ -499,6 +516,52 @@ namespace ShaderLibrary.CompileTool
         /// </summary>
         static HashSet<string> FindUsedParamNames(BfshaUniformBlock block, Material mat, string shaderOutDir, string shading, int gb, int zo, int mp)
         {
+            var use = SlotUseOf(shaderOutDir, shading, gb, zo, mp);
+
+            var used = new HashSet<string>(StringComparer.Ordinal);
+            // The "Mat" cbuffer's decompiled GLSL variable name is a naming CONVENTION observed
+            // on every material_prog*/deferred_*_prog* file checked (Ryujinx names it fp_c{binding+3},
+            // and Mat's binding is 8 for every one seen - matches ShapeDrawing's own hardcoded
+            // BindBufferBase(..., 8, ...)), not something recoverable from the BFSHA data itself.
+            // If a program ever doesn't follow it, "used" would wrongly come back empty for every
+            // parameter - so when the marker string is absent from the combined text altogether,
+            // treat every typed parameter as used (show it) rather than silently hiding all of
+            // them on a broken assumption.
+            if (!use.HasMatVar)
+            {
+                foreach (var pEntry in mat.ShaderParams)
+                    if (block.Uniforms.ContainsKey(pEntry.Key))
+                        used.Add(pEntry.Key);
+                return used;
+            }
+
+            foreach (var pEntry in mat.ShaderParams)
+            {
+                string name = pEntry.Key;
+                if (!block.Uniforms.ContainsKey(name))
+                    continue;
+                int offset = BuildMaterialUbo.GetUniformOffset(block.Uniforms[name]);
+                int byteLength = (int)pEntry.Value.DataSize;
+                if (IsReferenced(use, offset, byteLength))
+                    used.Add(name);
+            }
+            return used;
+        }
+
+        // Which components of which slots of the material block a set of programs reads, found by one pass over their text. A map's models share most of their
+        // programs, so each set is read and scanned once instead of once for every material of every model, and for every parameter byte besides.
+        sealed record SlotUse(bool HasMatVar, Dictionary<int, (bool Bare, int Components)> Slots);
+
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SlotUse> SlotUses = new(StringComparer.Ordinal);
+
+        static readonly Regex MaterialSlot = new(@"fp_c11\.data\[(\d+)\](\.[xyzwrgba]+)?", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        static SlotUse SlotUseOf(string shaderOutDir, string shading, int gb, int zo, int mp)
+        {
+            string key = $"{shaderOutDir}|{shading}|{gb}|{zo}|{mp}";
+            if (SlotUses.TryGetValue(key, out var known))
+                return known;
+
             var text = new StringBuilder();
             void AppendIfExists(int progIdx)
             {
@@ -516,35 +579,23 @@ namespace ShaderLibrary.CompileTool
             AppendIfExists(mp);
             string combined = text.ToString();
 
-            var used = new HashSet<string>(StringComparer.Ordinal);
-            // The "Mat" cbuffer's decompiled GLSL variable name is a naming CONVENTION observed
-            // on every material_prog*/deferred_*_prog* file checked (Ryujinx names it fp_c{binding+3},
-            // and Mat's binding is 8 for every one seen - matches ShapeDrawing's own hardcoded
-            // BindBufferBase(..., 8, ...)), not something recoverable from the BFSHA data itself.
-            // If a program ever doesn't follow it, "used" would wrongly come back empty for every
-            // parameter - so when the marker string is absent from the combined text altogether,
-            // treat every typed parameter as used (show it) rather than silently hiding all of
-            // them on a broken assumption.
-            const string matVar = "fp_c11.data[";
-            if (!combined.Contains(matVar, StringComparison.Ordinal))
+            var slots = new Dictionary<int, (bool Bare, int Components)>();
+            foreach (Match m in MaterialSlot.Matches(combined))
             {
-                foreach (var pEntry in mat.ShaderParams)
-                    if (block.Uniforms.ContainsKey(pEntry.Key))
-                        used.Add(pEntry.Key);
-                return used;
+                int slot = int.Parse(m.Groups[1].Value);
+                slots.TryGetValue(slot, out var seen);
+                if (!m.Groups[2].Success)
+                {
+                    slots[slot] = (true, seen.Components);
+                    continue;
+                }
+                int mask = seen.Components;
+                foreach (char c in m.Groups[2].Value)
+                    mask |= c switch { 'x' or 'r' => 1, 'y' or 'g' => 2, 'z' or 'b' => 4, 'w' or 'a' => 8, _ => 0 };
+                slots[slot] = (seen.Bare, mask);
             }
 
-            foreach (var pEntry in mat.ShaderParams)
-            {
-                string name = pEntry.Key;
-                if (!block.Uniforms.ContainsKey(name))
-                    continue;
-                int offset = BuildMaterialUbo.GetUniformOffset(block.Uniforms[name]);
-                int byteLength = (int)pEntry.Value.DataSize;
-                if (IsReferenced(combined, offset, byteLength))
-                    used.Add(name);
-            }
-            return used;
+            return SlotUses[key] = new SlotUse(combined.Contains("fp_c11.data[", StringComparison.Ordinal), slots);
         }
 
         /// <summary>
@@ -555,7 +606,7 @@ namespace ShaderLibrary.CompileTool
         /// unconditionally - too structurally varied to pattern-match cheaply, and wrongly hiding
         /// a genuinely-used one is worse than never hiding one of these.
         /// </summary>
-        static bool IsReferenced(string shaderText, int byteOffset, int byteLength)
+        static bool IsReferenced(SlotUse use, int byteOffset, int byteLength)
         {
             if (byteLength > 16)
                 return true;
@@ -565,17 +616,8 @@ namespace ShaderLibrary.CompileTool
                 int byteAt = byteOffset + i * 4;
                 int slot = byteAt / 16;
                 int comp = (byteAt % 16) / 4;
-                char xyzw = "xyzw"[comp];
-                char rgba = "rgba"[comp];
-
-                foreach (Match m in Regex.Matches(shaderText, $@"fp_c11\.data\[{slot}\](\.[xyzwrgba]+)?"))
-                {
-                    if (!m.Groups[1].Success)
-                        return true; // bare reference - the whole vec4 is used, every component counts
-                    string swizzle = m.Groups[1].Value;
-                    if (swizzle.IndexOf(xyzw) >= 0 || swizzle.IndexOf(rgba) >= 0)
-                        return true;
-                }
+                if (use.Slots.TryGetValue(slot, out var seen) && (seen.Bare || (seen.Components & (1 << comp)) != 0))
+                    return true;
             }
             return false;
         }

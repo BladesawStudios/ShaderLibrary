@@ -469,7 +469,8 @@ namespace ShaderLibrary.CompileTool
 
                 string safeName = shape.Name.Replace(":", "_").Replace("/", "_");
                 string vtxFile = Path.Combine(outDir, $"{safeName}_vtx.bin");
-                using (var bw = new BinaryWriter(File.Create(vtxFile)))
+                var vertexStream = new MemoryStream((int)Math.Max(vb.VertexCount, 1u) * 192);
+                using (var bw = new BinaryWriter(vertexStream))
                 {
                     for (int i = 0; i < vb.VertexCount; i++)
                     {
@@ -562,8 +563,11 @@ namespace ShaderLibrary.CompileTool
                     }
                 }
 
+                ExportOutput.WriteBytes(vtxFile, vertexStream.ToArray());
+
                 string idxFile = Path.Combine(outDir, $"{safeName}_idx.bin");
-                using (var bw = new BinaryWriter(File.Create(idxFile)))
+                var indexStream = new MemoryStream(indices.Length * 4);
+                using (var bw = new BinaryWriter(indexStream))
                 {
                     foreach (uint idx in indices)
                         bw.Write((uint)idx);
@@ -581,10 +585,11 @@ namespace ShaderLibrary.CompileTool
                             bw.Write((uint)(idx + rebase));
                     }
                 }
+                ExportOutput.WriteBytes(idxFile, indexStream.ToArray());
 
                 // Shape UBO (128 bytes)
                 byte[] shapeUbo = GsysUniformBuffers.BuildGsysShape(shape);
-                File.WriteAllBytes(Path.Combine(outDir, $"{safeName}_shape.bin"), shapeUbo);
+                ExportOutput.WriteBytes(Path.Combine(outDir, $"{safeName}_shape.bin"), shapeUbo);
 
                 // Context UBO (240 bytes)
                 if (shape.SubMeshBoundings.Count > 0)
@@ -593,7 +598,7 @@ namespace ShaderLibrary.CompileTool
                     var center = new GsysUniformBuffers.Vector3(b.Center.X, b.Center.Y, b.Center.Z);
                     float radius = MathF.Sqrt(b.Extent.X * b.Extent.X + b.Extent.Y * b.Extent.Y + b.Extent.Z * b.Extent.Z);
                     byte[] ctxUbo = GsysUniformBuffers.BuildGsysContext(center, radius);
-                    File.WriteAllBytes(Path.Combine(outDir, $"{safeName}_context.bin"), ctxUbo);
+                    ExportOutput.WriteBytes(Path.Combine(outDir, $"{safeName}_context.bin"), ctxUbo);
                 }
 
                 // Material options dump

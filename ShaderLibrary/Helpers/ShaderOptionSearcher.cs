@@ -19,16 +19,85 @@ namespace ShaderLibrary.Helpers
 
             Debug.WriteLine($"Failed to find shader. Using backup check.");
 
-            //Lookup the key in the key list
-            int num_keys_per_program = shader.StaticKeyLength + shader.DynamicKeyLength;
-
             //Temp fall back to previous search method
             //Should not need to run unless the shader options given are incomplete (ie missing render info options)
+            return FirstValidProgram(shader, options);
+        }
+
+        // The choice each program has for each option, decoded once per shading model: a shading model has thousands of programs and a program that is not an exact match
+        // is found by looking at them one after another, each time decoding its key for every option given, by name.
+        sealed class Columns(string[] names, int[][] choiceOfProgram)
+        {
+            public readonly string[] Names = names;
+            public readonly int[][] ChoiceOfProgram = choiceOfProgram;
+        }
+
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ShaderModel, Columns> ColumnsOf = new();
+
+        static Columns ColumnsFor(ShaderModel shader)
+        {
+            if (ColumnsOf.TryGetValue(shader, out var ready))
+                return ready;
+            lock (ColumnsOf)
+            {
+                if (ColumnsOf.TryGetValue(shader, out var held))
+                    return held;
+
+                int keys = shader.StaticKeyLength + shader.DynamicKeyLength;
+                var names = new List<string>();
+                var columns = new List<int[]>();
+                foreach (var option in shader.StaticOptions.Values)
+                {
+                    var column = new int[shader.Programs.Count];
+                    for (int i = 0; i < column.Length; i++)
+                        column[i] = option.GetChoiceIndex(shader.KeyTable[keys * i + option.Bit32Index]);
+                    names.Add(option.Name);
+                    columns.Add(column);
+                }
+                foreach (var option in shader.DynamicOptions.Values)
+                {
+                    var column = new int[shader.Programs.Count];
+                    int at = shader.StaticKeyLength + option.Bit32Index - option.KeyOffset;
+                    for (int i = 0; i < column.Length; i++)
+                        column[i] = option.GetChoiceIndex(shader.KeyTable[keys * i + at]);
+                    names.Add(option.Name);
+                    columns.Add(column);
+                }
+                var made = new Columns([.. names], [.. columns]);
+                ColumnsOf.Add(shader, made);
+                return made;
+            }
+        }
+
+        // The first program whose choice for every option given is the one asked for: what walking the programs with IsValidProgram finds, without decoding a key for each.
+        static int FirstValidProgram(ShaderModel shader, Dictionary<string, string> options)
+        {
+            var columns = ColumnsFor(shader);
+            var wanted = new List<(int[] Column, int Choice)>();
+            foreach (var (name, value) in options)
+            {
+                int at = Array.IndexOf(columns.Names, name);
+                if (at < 0)
+                    continue;
+
+                // A value that is no choice of the option is none of the programs' choices.
+                var option = shader.StaticOptions.ContainsKey(name) ? shader.StaticOptions[name] : shader.DynamicOptions[name];
+                int choice = option.Choices.GetIndex(value);
+                if (choice < 0)
+                    return -1;
+                wanted.Add((columns.ChoiceOfProgram[at], choice));
+            }
+
             for (int i = 0; i < shader.Programs.Count; i++)
             {
-                var idx = num_keys_per_program * i;
-
-                if (IsValidProgram(shader, i, options))
+                bool all = true;
+                foreach (var (column, choice) in wanted)
+                    if (column[i] != choice)
+                    {
+                        all = false;
+                        break;
+                    }
+                if (all)
                     return i;
             }
             return -1;

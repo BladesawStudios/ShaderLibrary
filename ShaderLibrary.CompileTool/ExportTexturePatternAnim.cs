@@ -76,10 +76,10 @@ namespace ShaderLibrary.CompileTool
             sb.AppendLine("  \"textures\": [");
             for (int ti = 0; ti < textureNames.Count; ti++)
             {
-                var (texture, file, format, width, height) = ResolveTexture(assets, modelName, textureNames[ti], ti);
+                var (texture, file, format, width, height, compSelect) = ResolveTexture(assets, modelName, textureNames[ti], ti);
                 texturesToExport.Add(texture);
                 sb.Append($"    {{ \"texture\": \"{Escape(texture)}\", \"file\": \"{Escape(file)}\", " +
-                          $"\"format\": \"{format}\", \"width\": {width}, \"height\": {height} }}");
+                          $"\"format\": \"{format}\", \"width\": {width}, \"height\": {height}, \"comp_select\": [{string.Join(", ", compSelect)}] }}");
                 sb.AppendLine(ti == textureNames.Count - 1 ? "" : ",");
             }
             sb.AppendLine("  ],");
@@ -145,7 +145,7 @@ namespace ShaderLibrary.CompileTool
         }
 
         /// <summary>The exported .bin name/format/size for one texture, or empty strings and zeroes if <c>TexToGo/</c> has no such entry or it fails to parse - same tolerance <c>ExportManifest.BuildSamplers</c> has, so one bad texture costs that texture and not the whole anim.</summary>
-        static (string Texture, string File, string Format, int Width, int Height) ResolveTexture(
+        static (string Texture, string File, string Format, int Width, int Height, byte[] CompSelect) ResolveTexture(
             IGameAssets assets, string modelName, string textureName, int index)
         {
             string name = DedupeName(assets, modelName, textureName, index);
@@ -153,19 +153,19 @@ namespace ShaderLibrary.CompileTool
             if (txtg is null)
             {
                 Console.WriteLine($"[ExportTestBench] texture pattern anim references '{textureName}', which TexToGo/ does not have.");
-                return (name, "", "", 0, 0);
+                return (name, "", "", 0, 0, [0, 1, 2, 3]);
             }
             try
             {
                 var t = txtg.Load(0);
                 int w = (int)t.Width, h = (int)t.Height;
                 string fmt = t.Format.ToString();
-                return (name, $"{name}_{w}x{h}_{fmt}.bin", fmt, w, h);
+                return (name, $"{name}_{w}x{h}_{fmt}.bin", fmt, w, h, t.CompSelect);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[ExportTestBench] texture pattern anim texture '{name}' failed to read: {ex.Message}");
-                return (name, "", "", 0, 0);
+                return (name, "", "", 0, 0, [0, 1, 2, 3]);
             }
         }
 

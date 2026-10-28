@@ -52,11 +52,14 @@ namespace ShaderLibrary.CompileTool
         public static void ExportFrom(ResFile animResFile, string modelName, string outDir,
             HashSet<string> alreadyExported, IReadOnlyDictionary<string, Material> modelMaterials)
         {
+            // An anim that also drives visibility or a texture pattern is filed under that, and its parameter curves are still parameter curves.
             var buckets = new (string Kind, BfresLibrary.ResDict<MaterialAnim> Dict)[]
             {
                 ("ShaderParam", animResFile.ShaderParamAnims),
                 ("Color", animResFile.ColorAnims),
                 ("TexSrt", animResFile.TexSrtAnims),
+                ("ShaderParam", animResFile.MatVisibilityAnims),
+                ("ShaderParam", animResFile.TexPatternAnims),
             };
 
             foreach (var (kind, dict) in buckets)

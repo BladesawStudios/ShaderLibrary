@@ -13,12 +13,10 @@
     <ProjectReference Include="..\..\McSharp\src\McSharp\McSharp.csproj" />
     <ProjectReference Include="..\..\TxtgSharp\src\TxtgSharp\TxtgSharp.csproj" />
     <ProjectReference Include="..\..\Yaz0Sharp\src\Yaz0Sharp\Yaz0Sharp.csproj" />
+    <ProjectReference Include="..\..\BfresLibrary\BfresLibrary\BfresLibrary.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="BfresLibrary">
-      <HintPath>Libs\Bfres\BfresLibrary.dll</HintPath>
-    </Reference>
     <Reference Include="Ryujinx.Common">
       <HintPath>Libs\Ryujinx.Common.dll</HintPath>
     </Reference>
@@ -28,11 +26,12 @@
     <Reference Include="Spv.Generator">
       <HintPath>Libs\Spv.Generator.dll</HintPath>
     </Reference>
+    <!-- BfresLibrary exposes these in its own API (vectors, the binary reader its loaders hand out). -->
     <Reference Include="Syroot.BinaryData">
-      <HintPath>Libs\Bfres\Syroot.BinaryData.dll</HintPath>
+      <HintPath>..\..\BfresLibrary\Libraries\Syroot.BinaryData.dll</HintPath>
     </Reference>
     <Reference Include="Syroot.Maths">
-      <HintPath>Libs\Bfres\Syroot.Maths.dll</HintPath>
+      <HintPath>..\..\BfresLibrary\Libraries\Syroot.Maths.dll</HintPath>
     </Reference>
   </ItemGroup>
 

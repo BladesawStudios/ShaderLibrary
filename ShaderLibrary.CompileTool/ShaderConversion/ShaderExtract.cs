@@ -56,7 +56,7 @@ namespace EffectLibraryTest
         {
             var control_code = new global::ShaderLibrary.ControlShader(shaderCode.ControlCode);
 
-            string code = TegraShaderTranslator.Decompile(shaderCode.ByteCode);
+            string code = TegraShaderTranslator.Decompile(shaderCode.ByteCode, control_code.GetConstants(shaderCode.ByteCode));
             float[] constants = control_code.GetConstantsAsFloats(shaderCode.ByteCode);
 
             //Apply the code to be usable with the UAM compiler

@@ -179,7 +179,7 @@ namespace ShaderLibrary.CompileTool
                         var usedNames = FindUsedParamNames(block, mat, shaderOutDir, shading, gb, zo, mp);
                         string matSafe = mat.Name.Replace(":", "_").Replace("/", "_");
                         string paramsPath = Path.Combine(outDir, "matubo", $"{matSafe}.params.json");
-                        if (File.Exists(paramsPath))
+                        if (ExportOutput.Exists(paramsPath))
                             BuildMaterialUbo.WriteParamLayout(block, mat, paramsPath, usedNames);
                     }
                 }

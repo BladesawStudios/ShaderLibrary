@@ -602,11 +602,10 @@ namespace ShaderLibrary.CompileTool
                 }
 
                 // Material options dump
-                using (var sw = new StreamWriter(Path.Combine(outDir, $"{safeName}_options.txt")))
-                {
-                    foreach (var opt in mat.ShaderAssign.ShaderOptions)
-                        sw.WriteLine($"{opt.Key}={opt.Value}");
-                }
+                var options = new System.Text.StringBuilder();
+                foreach (var opt in mat.ShaderAssign.ShaderOptions)
+                    options.AppendLine($"{opt.Key}={opt.Value}");
+                ExportOutput.WriteText(Path.Combine(outDir, $"{safeName}_options.txt"), options.ToString());
 
                 Console.WriteLine($"  Exported {safeName}: {vb.VertexCount} verts -> {vtxFile}, {indices.Length} idxs -> {idxFile}");
             }

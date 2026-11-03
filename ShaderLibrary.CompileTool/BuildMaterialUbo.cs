@@ -154,7 +154,7 @@ namespace ShaderLibrary.CompileTool
             }
             sb.AppendLine("  ]");
             sb.AppendLine("}");
-            File.WriteAllText(outPath, sb.ToString());
+            ExportOutput.WriteText(outPath, sb.ToString());
         }
 
         /// <summary>BFSHA stores <c>DataOffset</c> 1-based; 0 means "derive from Index * 4". Same convention <c>TestSystemShading.DumpUniformBlocks</c>/<c>ShaderLabelUtil.GetUniformLabels</c> use.</summary>

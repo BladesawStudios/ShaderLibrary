@@ -239,7 +239,7 @@ namespace ShaderLibrary.CompileTool
             sb.AppendLine("  ]");
             sb.AppendLine("}");
 
-            File.WriteAllText(outPath, sb.ToString());
+            ExportOutput.WriteText(outPath, sb.ToString());
             Console.WriteLine($"[ExportTestBench] Exported skeleton ({skel.BoneList.Count} bones, " +
                 $"{smoothCount} smooth + {rigidCount} rigid matrices, scaling mode {scalingMode}) -> {outPath}");
 
@@ -331,7 +331,7 @@ namespace ShaderLibrary.CompileTool
             sb.AppendLine("  ]");
             sb.AppendLine("}");
 
-            File.WriteAllText(outPath, sb.ToString());
+            ExportOutput.WriteText(outPath, sb.ToString());
             Console.WriteLine($"[ExportTestBench] Exported anim '{anim.Name}' ({anim.BoneAnims.Count} bone anims, {anim.FrameCount} frames) -> {outPath}");
 
             static string F(float v) => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
@@ -602,11 +602,10 @@ namespace ShaderLibrary.CompileTool
                 }
 
                 // Material options dump
-                using (var sw = new StreamWriter(Path.Combine(outDir, $"{safeName}_options.txt")))
-                {
-                    foreach (var opt in mat.ShaderAssign.ShaderOptions)
-                        sw.WriteLine($"{opt.Key}={opt.Value}");
-                }
+                var options = new System.Text.StringBuilder();
+                foreach (var opt in mat.ShaderAssign.ShaderOptions)
+                    options.AppendLine($"{opt.Key}={opt.Value}");
+                ExportOutput.WriteText(Path.Combine(outDir, $"{safeName}_options.txt"), options.ToString());
 
                 Console.WriteLine($"  Exported {safeName}: {vb.VertexCount} verts -> {vtxFile}, {indices.Length} idxs -> {idxFile}");
             }

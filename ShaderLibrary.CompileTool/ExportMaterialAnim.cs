@@ -190,7 +190,7 @@ namespace ShaderLibrary.CompileTool
             sb.AppendLine("  ]");
             sb.AppendLine("}");
 
-            File.WriteAllText(outPath, sb.ToString());
+            ExportOutput.WriteText(outPath, sb.ToString());
             Console.WriteLine($"[ExportTestBench] Exported {kind} material anim '{anim.Name}' " +
                 $"({materials.Count} material(s), {totalCurves} curve(s), {totalConstants} constant(s), " +
                 $"{anim.FrameCount} frames) -> {outPath}");

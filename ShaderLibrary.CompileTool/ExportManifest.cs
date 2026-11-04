@@ -88,8 +88,10 @@ namespace ShaderLibrary.CompileTool
         public static void Run(IGameAssets assets, string bfshaPath, string modelName, string outDir,
                                string shaderOutDir)
         {
-            Directory.CreateDirectory(outDir);
-            Directory.CreateDirectory(shaderOutDir);
+            ExportOutput.EnsureFolder(outDir);
+
+            // The decompiled programs of every model go into one folder, which is made once however many models are exported.
+            ShaderFolders.GetOrAdd(shaderOutDir, folder => Directory.CreateDirectory(folder));
             // Decompile each program ONCE, keyed by index - many materials share a program, and
             // naming the file by index (not by shape) is what lets the manifest reference it.
             var decompiled = new HashSet<int>();
@@ -179,7 +181,7 @@ namespace ShaderLibrary.CompileTool
                         var usedNames = FindUsedParamNames(block, mat, shaderOutDir, shading, gb, zo, mp);
                         string matSafe = mat.Name.Replace(":", "_").Replace("/", "_");
                         string paramsPath = Path.Combine(outDir, "matubo", $"{matSafe}.params.json");
-                        if (File.Exists(paramsPath))
+                        if (ExportOutput.Exists(paramsPath))
                             BuildMaterialUbo.WriteParamLayout(block, mat, paramsPath, usedNames);
                     }
                 }
@@ -258,7 +260,7 @@ namespace ShaderLibrary.CompileTool
             sb.AppendLine("}");
 
             string path = Path.Combine(outDir, $"{modelName}.manifest.json");
-            File.WriteAllText(path, sb.ToString());
+            ExportOutput.WriteText(path, sb.ToString());
             Console.WriteLine();
             Console.WriteLine($"-> {path}");
         }
@@ -338,6 +340,8 @@ namespace ShaderLibrary.CompileTool
             }
             catch (IOException) { return false; }
         }
+
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DirectoryInfo> ShaderFolders = new(StringComparer.OrdinalIgnoreCase);
 
         static void DecompileProgram(BnshFile.BnshShaderProgram binProg, string dir, string label)
         {

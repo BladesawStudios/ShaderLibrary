@@ -239,7 +239,7 @@ namespace ShaderLibrary.CompileTool
             sb.AppendLine("  ]");
             sb.AppendLine("}");
 
-            File.WriteAllText(outPath, sb.ToString());
+            ExportOutput.WriteText(outPath, sb.ToString());
             Console.WriteLine($"[ExportTestBench] Exported skeleton ({skel.BoneList.Count} bones, " +
                 $"{smoothCount} smooth + {rigidCount} rigid matrices, scaling mode {scalingMode}) -> {outPath}");
 
@@ -331,7 +331,7 @@ namespace ShaderLibrary.CompileTool
             sb.AppendLine("  ]");
             sb.AppendLine("}");
 
-            File.WriteAllText(outPath, sb.ToString());
+            ExportOutput.WriteText(outPath, sb.ToString());
             Console.WriteLine($"[ExportTestBench] Exported anim '{anim.Name}' ({anim.BoneAnims.Count} bone anims, {anim.FrameCount} frames) -> {outPath}");
 
             static string F(float v) => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);

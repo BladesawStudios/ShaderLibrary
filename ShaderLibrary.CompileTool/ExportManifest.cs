@@ -260,7 +260,7 @@ namespace ShaderLibrary.CompileTool
             sb.AppendLine("}");
 
             string path = Path.Combine(outDir, $"{modelName}.manifest.json");
-            File.WriteAllText(path, sb.ToString());
+            ExportOutput.WriteText(path, sb.ToString());
             Console.WriteLine();
             Console.WriteLine($"-> {path}");
         }

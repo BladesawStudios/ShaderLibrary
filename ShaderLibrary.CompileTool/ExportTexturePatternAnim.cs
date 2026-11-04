@@ -138,7 +138,7 @@ namespace ShaderLibrary.CompileTool
             sb.AppendLine("  ]");
             sb.AppendLine("}");
 
-            File.WriteAllText(outPath, sb.ToString());
+            ExportOutput.WriteText(outPath, sb.ToString());
             Console.WriteLine($"[ExportTestBench] Exported texture pattern anim '{anim.Name}' " +
                 $"({materials.Count} material(s), {materials.Sum(m => m.PatternAnimInfos.Count)} sampler(s), " +
                 $"{textureNames.Count} texture(s), {anim.FrameCount} frames) -> {outPath}");

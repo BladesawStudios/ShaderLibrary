@@ -45,7 +45,7 @@ namespace ShaderLibrary.CompileTool
 
         static void BuildForModel(BfshaFile bfsha, Model model, string outDir)
         {
-            Directory.CreateDirectory(outDir);
+            ExportOutput.EnsureFolder(outDir);
             foreach (var matEntry in model.Materials)
             {
                 Material mat = matEntry.Value;

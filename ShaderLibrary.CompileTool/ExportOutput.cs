@@ -15,5 +15,8 @@ namespace ShaderLibrary.CompileTool
         public static Action<string, string> WriteText { get; set; } = File.WriteAllText;
 
         public static Func<string, bool> Exists { get; set; } = File.Exists;
+
+        // Makes the folder a model's files go into, which a host that keeps them together has no need of.
+        public static Action<string> EnsureFolder { get; set; } = path => Directory.CreateDirectory(path);
     }
 }
